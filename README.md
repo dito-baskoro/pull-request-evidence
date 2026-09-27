@@ -4,6 +4,8 @@ PR Evidence Pack is a read-only web application that turns a GitHub pull request
 
 This repository implements the first vertical slice of the plan (sign in, connect a read-only GitHub App, select a PR, ingest immutable artifacts, build a deterministic change map, produce one cited behavioral claim, validate the citation, and render a working commit permalink). Later milestones extend the same evidence model into requirements, risks, tests, and synthesis.
 
+The deterministic core and read-only GitHub seams (Milestones 2 to 4) are implemented under `server/utils/{github,patches,analysis}` and exposed through the Nitro routes under `server/api/`. The AI behavioral pass and citation validation (Milestone 5) are left as a typed hook (`AiAnalysisHook` in `server/utils/analysis/orchestrator.ts`).
+
 ## Framework note: Nuxt, not Next.js
 
 The authoritative plan (`../PR_EVIDENCE_PACK_IMPLEMENTATION_PLAN.md`) is written for Next.js. This implementation is a faithful translation to Nuxt 3 (Vue 3 plus the Nitro server), which was chosen because a server-side runtime is required for GitHub App token exchange, AI calls, and the Supabase service-role key, none of which may reach the browser. The mapping is:
@@ -28,6 +30,32 @@ server/utils/supabase/
   client.ts               Browser anon client boundary
   server.ts               Per-request SSR client (reads auth cookies)
   admin.ts                Service-role client (SERVER-ONLY, bypasses RLS)
+  analyses/[id].vue       Analysis view: change map + registered evidence permalinks
+components/
+  ChangeMap.vue           Category counts, exclusion reasons, candidate associations
+server/utils/
+  hash.ts                 SHA-256 content-hash helper
+  github/
+    app-auth.ts           GitHub App JWT + short-lived installation token exchange
+    client.ts             Octokit factory from an installation token
+    fetch-pr.ts           Read-only PR metadata, changed files/patches, commits
+    fetch-checks.ts       Read-only check-run fetch + normalization
+    fetch-content.ts      Read-only raw file content at an immutable SHA
+    permalink.ts          Commit-SHA blob permalink builder (pure)
+  patches/
+    parse-patch.ts        Unified-diff parser into base/head line maps (pure)
+    map-lines.ts          Head/base line resolution + added-run extraction (pure)
+  analysis/
+    classify-file.ts      Plan section 9 file classification (pure)
+    change-map.ts         Deterministic change map + candidate associations (pure)
+    evidence-registry.ts  Opaque E-NNNNN evidence IDs bound to the head SHA
+    orchestrator.ts       Run pipeline seam + typed AI hook (FEAT-003)
+server/api/
+  github/installations.get.ts  List owned installations
+  github/repositories.get.ts   List repos for an owned installation
+  github/pulls.get.ts          List open PRs for an owned repository
+  analyses/index.post.ts       Create a run (ownership-checked) + deterministic pipeline
+  analyses/[id].get.ts         Run status + change map + evidence spans
 types/
   github.ts               PR metadata, changed file, patch hunk, check result
   analysis.ts             Artifact kind, run status, evidence span, change map
@@ -35,6 +63,13 @@ types/
 supabase/migrations/
   0001_init.sql           Schema for the slice tables
   0002_rls.sql            Row-level security: enable + owner-scoped policies
+test/
+  permalink.test.ts       buildPermalink / buildLineFragment
+  parse-patch.test.ts     multi-hunk, add/del/context, no-newline-at-EOF
+  map-lines.test.ts       head/base resolution + added runs
+  classify-file.test.ts   representative JS/TS paths, lockfiles, migrations, generated
+  change-map.test.ts      category counts + candidate associations (never proof of coverage)
+  evidence-registry.test.ts  E-NNNNN stability/uniqueness + SHA + permalink
 ```
 
 ## Prerequisites
