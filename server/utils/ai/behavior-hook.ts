@@ -130,46 +130,61 @@ async function persistReportItems(
   // join rows. RLS-independent (service-role); scoped to the run's artifacts.
   const evidenceKeyToId = await loadEvidenceSpanIds(admin, result.analysisRunId)
 
-  let sortOrder = 0
-  for (const item of items) {
-    const { data: inserted, error: itemErr } = await admin
-      .from('report_items')
-      .insert({
-        analysis_run_id: result.analysisRunId,
-        section: 'behavioral_changes',
-        classification: item.classification,
-        title: item.affectedComponent,
-        statement: item.behaviorStatement,
-        severity: null,
-        confidence: item.confidence,
-        sort_order: sortOrder,
-        validation_status: item.validationStatus,
-        metadata: {
-          userVisible: item.userVisible,
-          affectedComponent: item.affectedComponent,
-          downgradeReason: item.downgradeReason,
-        },
-      })
-      .select('id')
-      .single()
-    sortOrder += 1
+  // Insert all items in a SINGLE batch so a failure leaves NO partial report
+  // items under a run the orchestrator will mark `failed`. A per-item loop
+  // could leave already-inserted rows behind when a later insert fails; a batch
+  // insert is rejected or accepted as a whole. `select('id')` returns the ids
+  // in insert order so we can build the citation joins.
+  const itemRows = items.map((item, index) => ({
+    analysis_run_id: result.analysisRunId,
+    section: 'behavioral_changes',
+    classification: item.classification,
+    title: item.affectedComponent,
+    statement: item.behaviorStatement,
+    severity: null,
+    confidence: item.confidence,
+    sort_order: index,
+    validation_status: item.validationStatus,
+    metadata: {
+      userVisible: item.userVisible,
+      affectedComponent: item.affectedComponent,
+      downgradeReason: item.downgradeReason,
+    },
+  }))
 
-    if (itemErr || !inserted) {
-      throw new Error(`Failed to persist report item: ${itemErr?.message ?? 'unknown error'}`)
-    }
+  const { data: inserted, error: itemErr } = await admin
+    .from('report_items')
+    .insert(itemRows)
+    .select('id')
 
-    const joinRows = item.evidenceIds
+  if (itemErr || !inserted || inserted.length !== items.length) {
+    throw new Error(`Failed to persist report items: ${itemErr?.message ?? 'unexpected row count'}`)
+  }
+
+  // Build every citation join row up front, pairing each inserted id with its
+  // originating item (same order as itemRows).
+  const joinRows = items.flatMap((item, index) =>
+    item.evidenceIds
       .map((key) => evidenceKeyToId.get(key))
       .filter((id): id is string => Boolean(id))
       .map((evidenceSpanId) => ({
-        report_item_id: inserted.id,
+        report_item_id: inserted[index].id,
         evidence_span_id: evidenceSpanId,
         support_type: 'supports' as const,
-      }))
+      })),
+  )
 
-    if (joinRows.length > 0) {
-      const { error: joinErr } = await admin.from('report_item_evidence').insert(joinRows)
-      if (joinErr) throw new Error(`Failed to persist report item evidence: ${joinErr.message}`)
+  if (joinRows.length > 0) {
+    const { error: joinErr } = await admin.from('report_item_evidence').insert(joinRows)
+    if (joinErr) {
+      // The join insert failed after items were inserted. Roll the items back
+      // so the failed run leaves no partial report items (no orphaned rows
+      // without their evidence). Best-effort: surface the original error.
+      await admin.from('report_items').delete().eq('analysis_run_id', result.analysisRunId).then(
+        () => undefined,
+        () => undefined,
+      )
+      throw new Error(`Failed to persist report item evidence: ${joinErr.message}`)
     }
   }
 }

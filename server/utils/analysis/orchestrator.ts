@@ -16,6 +16,17 @@
 // The AI + citation-validation steps are left as a typed hook that FEAT-003
 // fills in. Deterministic evidence creation stays fully independent of any AI
 // provider.
+//
+// DEVIATION (intentional for this slice): `runAnalysis` executes the whole
+// fetch/persist/AI pipeline synchronously inside POST /api/analyses, so the
+// request blocks until the run reaches a terminal state. The plan describes an
+// async run with status polling (GET /api/analyses/:id already exists for it),
+// which a later milestone should adopt by moving this call off the request
+// path (queue/worker) so a large PR or slow model does not tie up the request.
+// It is kept inline here because the slice only needs one end-to-end run and
+// the synchronous path keeps the vertical slice easy to reason about and test.
+// Re-ingestion is made idempotent (see clearRunScopedRows) so re-running the
+// same run key does not duplicate rows regardless of the execution model.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Octokit } from '@octokit/rest'
@@ -143,11 +154,25 @@ export async function runAnalysis(
   try {
     // 2. Ingest (read-only).
     await setStatus(admin, input.analysisRunId, 'ingesting', { started_at: new Date().toISOString() })
+
+    // Idempotent re-ingestion (plan Milestone 3: "repeating ingestion does not
+    // duplicate records"). The run upsert in POST /api/analyses is idempotent
+    // on (pull_request_id, workflow_version, model_id), so a second request
+    // resolves to the SAME run id and re-runs this pipeline from the top. All
+    // run-scoped rows are inserted with plain .insert(), so without a guard a
+    // re-run would duplicate artifacts, evidence spans, report items, and
+    // check results for the same immutable SHA. Clear those rows first so
+    // re-ingestion rebuilds them cleanly. Deleting artifacts cascades to
+    // evidence_spans; deleting report_items cascades to report_item_evidence.
+    await clearRunScopedRows(admin, input.analysisRunId)
+
     const pr = await fetchPullRequest(octokit, input.owner, input.repo, input.pullNumber)
     const checks = await fetchChecksForSha(octokit, input.owner, input.repo, pr.metadata.headSha)
 
-    // 3. Persist immutable artifacts with content hashes.
+    // 3. Persist immutable artifacts with content hashes, and the normalized
+    // check runs into the dedicated check_results table.
     await persistArtifacts(admin, input.analysisRunId, pr, checks)
+    await persistCheckResults(admin, input.analysisRunId, checks)
 
     // 4/5. Deterministic phase: change map + evidence spans.
     await setStatus(admin, input.analysisRunId, 'deterministic')
@@ -308,6 +333,55 @@ async function persistArtifacts(
   if (rows.length === 0) return
   const { error } = await admin.from('artifacts').insert(rows)
   if (error) throw new Error(`Failed to persist artifacts: ${error.message}`)
+}
+
+/**
+ * Persist normalized check runs into the dedicated check_results table.
+ *
+ * Checks are also stored as `check` artifacts (for the generic content-hash
+ * ledger), but the normalized check_results table is what later milestones read
+ * for CI status. Keeping both in sync avoids a schema/persistence mismatch.
+ */
+async function persistCheckResults(
+  admin: SupabaseClient,
+  analysisRunId: string,
+  checks: Awaited<ReturnType<typeof fetchChecksForSha>>,
+): Promise<void> {
+  if (checks.length === 0) return
+  const rows = checks.map((check) => ({
+    analysis_run_id: analysisRunId,
+    github_check_run_id: check.githubCheckRunId,
+    name: check.name,
+    status: check.status,
+    conclusion: check.conclusion,
+    details_url: check.detailsUrl,
+    started_at: check.startedAt,
+    completed_at: check.completedAt,
+  }))
+  const { error } = await admin.from('check_results').insert(rows)
+  if (error) throw new Error(`Failed to persist check results: ${error.message}`)
+}
+
+/**
+ * Delete all run-scoped rows before a (re-)ingestion so repeating a run does
+ * not duplicate records (plan Milestone 3). Deleting artifacts cascades to
+ * evidence_spans; deleting report_items cascades to report_item_evidence
+ * (see the foreign keys in 0001_init.sql). check_results is deleted directly.
+ */
+async function clearRunScopedRows(
+  admin: SupabaseClient,
+  analysisRunId: string,
+): Promise<void> {
+  // Order does not matter for correctness (each delete is scoped by run and the
+  // cascades handle children), but we clear leaf-owning tables explicitly.
+  const artifactsDel = await admin.from('artifacts').delete().eq('analysis_run_id', analysisRunId)
+  if (artifactsDel.error) throw new Error(`Failed to clear prior artifacts: ${artifactsDel.error.message}`)
+
+  const reportItemsDel = await admin.from('report_items').delete().eq('analysis_run_id', analysisRunId)
+  if (reportItemsDel.error) throw new Error(`Failed to clear prior report items: ${reportItemsDel.error.message}`)
+
+  const checksDel = await admin.from('check_results').delete().eq('analysis_run_id', analysisRunId)
+  if (checksDel.error) throw new Error(`Failed to clear prior check results: ${checksDel.error.message}`)
 }
 
 /** Map file_path -> persisted patch artifact id for this run. */

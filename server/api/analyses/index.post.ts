@@ -16,9 +16,20 @@ import { runAnalysis } from '~/server/utils/analysis/orchestrator'
 import { createDefaultBehaviorAnalyzer } from '~/server/utils/ai/provider'
 import { createBehaviorAnalysisHook } from '~/server/utils/ai/behavior-hook'
 
-// The initial workflow/model ids the run is created with. The AI hook updates
-// these on the run to the concrete workflow version + resolved model id once
-// the behavioral-change pass runs (provenance; plan section 10, step 8).
+// The initial workflow/model ids the run is created with. These also form the
+// run's idempotency key (pull_request_id, workflow_version, model_id), so they
+// must be stable across re-requests of the same logical run. The AI hook
+// UPDATEs these on the run to the concrete workflow version + resolved model id
+// once the behavioral-change pass runs (provenance; plan section 10, step 8).
+//
+// PROVENANCE NOTE (intentional for this slice): when no model runs (no AI key
+// configured, or the AI stage fails before recording provenance) the run keeps
+// `model_id = 'deterministic-only'`. That value is a deliberate sentinel, not a
+// real model id: it records that only the deterministic phase produced output.
+// It is kept as the stable idempotency-key component rather than a null/`none`
+// value so re-requests resolve to the same run; the report view surfaces the
+// run status/limitations so a reader is not misled into treating a
+// deterministic-only run as an AI-analyzed one.
 const WORKFLOW_VERSION = 'slice-1'
 const MODEL_ID = 'deterministic-only'
 
