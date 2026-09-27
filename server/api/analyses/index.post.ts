@@ -13,7 +13,12 @@ import { createError, defineEventHandler, readBody } from 'h3'
 import type { AnalysisRunStatus } from '~/types/analysis'
 import { getInstallationOctokit } from '~/server/utils/github/app-auth'
 import { runAnalysis } from '~/server/utils/analysis/orchestrator'
+import { createDefaultBehaviorAnalyzer } from '~/server/utils/ai/provider'
+import { createBehaviorAnalysisHook } from '~/server/utils/ai/behavior-hook'
 
+// The initial workflow/model ids the run is created with. The AI hook updates
+// these on the run to the concrete workflow version + resolved model id once
+// the behavioral-change pass runs (provenance; plan section 10, step 8).
 const WORKFLOW_VERSION = 'slice-1'
 const MODEL_ID = 'deterministic-only'
 
@@ -116,9 +121,21 @@ export default defineEventHandler(async (event): Promise<{ analysisId: string; s
   // Run the deterministic pipeline with the service-role admin client. The
   // orchestrator re-checks installation ownership before any privileged write.
   const admin = createSupabaseAdminClient()
+
+  // Build the AI hook behind the provider seam. If no AI key is configured the
+  // run still completes the deterministic phase; the AI stage is skipped.
+  let aiHook
+  try {
+    const analyzer = createDefaultBehaviorAnalyzer()
+    aiHook = createBehaviorAnalysisHook({ admin, analyzer })
+  }
+  catch {
+    aiHook = undefined
+  }
+
   try {
     await runAnalysis(
-      { admin, octokit },
+      { admin, octokit, aiHook },
       {
         analysisRunId: runRow.id,
         userId: user.id,

@@ -26,6 +26,7 @@ const { data, pending, error, refresh } = await useFetch(
         <span class="status-pill">{{ data.status }}</span>
         <span v-if="data.coverageStatus" class="coverage">coverage: {{ data.coverageStatus }}</span>
         <button type="button" @click="refresh()">Refresh</button>
+        <NuxtLink class="report-link" :to="`/reports/${analysisId}`">View cited report</NuxtLink>
       </div>
       <p v-if="data.errorMessage" class="analysis-error">{{ data.errorMessage }}</p>
 

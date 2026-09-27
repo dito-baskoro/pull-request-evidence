@@ -4,7 +4,7 @@ PR Evidence Pack is a read-only web application that turns a GitHub pull request
 
 This repository implements the first vertical slice of the plan (sign in, connect a read-only GitHub App, select a PR, ingest immutable artifacts, build a deterministic change map, produce one cited behavioral claim, validate the citation, and render a working commit permalink). Later milestones extend the same evidence model into requirements, risks, tests, and synthesis.
 
-The deterministic core and read-only GitHub seams (Milestones 2 to 4) are implemented under `server/utils/{github,patches,analysis}` and exposed through the Nitro routes under `server/api/`. The AI behavioral pass and citation validation (Milestone 5) are left as a typed hook (`AiAnalysisHook` in `server/utils/analysis/orchestrator.ts`).
+The deterministic core and read-only GitHub seams (Milestones 2 to 4) are implemented under `server/utils/{github,patches,analysis}` and exposed through the Nitro routes under `server/api/`. The AI behavioral-change pass and citation validation (Milestone 5) are implemented behind the `AiAnalysisHook` seam: the provider-isolated AI code lives under `server/utils/ai/`, and citation/provenance validation lives in `server/utils/analysis/citation-validator.ts`.
 
 ## Framework note: Nuxt, not Next.js
 
@@ -152,6 +152,27 @@ There are three distinct Supabase clients, each with a clear trust boundary:
 1. `server/utils/supabase/client.ts`: browser anon client. Runs in the browser, uses the public anon key, constrained by RLS.
 2. `server/utils/supabase/server.ts`: per-request SSR client. Runs on the server, reads the request's auth cookies, uses the anon key, still constrained by RLS as the signed-in user.
 3. `server/utils/supabase/admin.ts`: service-role client. Server-only, bypasses RLS. Must never be imported into client code; always perform ownership checks yourself when using it.
+
+## AI boundary and citation validation (Milestone 5)
+
+The behavioral-change pass (plan section 10, Pass B) turns registered evidence into a structured, cited claim. It is deliberately isolated so no AI provider code touches the deterministic pipeline or the browser bundle.
+
+- **Provider isolation.** `server/utils/ai/provider.ts` is the ONLY module that imports an AI provider (`ai`, `@ai-sdk/openai`). It exposes a typed `BehaviorAnalyzer` interface; the default implementation calls the Vercel AI SDK `generateObject` constrained by a strict Zod schema, with the provider and key read from server-only `runtimeConfig` (`aiApiKey` / `aiGatewayBaseUrl`). Tests inject a fake analyzer, so the whole pipeline runs with no network. Never import from `server/utils/ai/*` in components or pages.
+- **Trust boundary.** `server/utils/ai/prompts.ts` instructs the model to treat all repository/PR content as untrusted data (never instructions), to cite only the opaque evidence ids from the provided manifest, and never to invent file paths or line numbers.
+- **Strict schema.** `server/utils/ai/schemas.ts` validates the pass output with `.strict()` so unknown/hallucinated fields are rejected. Classification is restricted to `observed` or `inferred`; confidence is bounded to `[0, 1]`.
+- **Citation and provenance validation.** `server/utils/analysis/citation-validator.ts` (a pure function) enforces plan section 10: every cited id must exist in the run's registry and belong to the analyzed commit SHA; observed/inferred items require at least one valid evidence id; items with invalid or missing evidence are downgraded to `unknown` (or dropped) so they are never shown as facts.
+- **Provenance persistence.** When the AI hook runs, it records `workflow_version` and `model_id` on the `analysis_runs` row and persists validated items into `report_items` with their citations in `report_item_evidence`. On provider failure or malformed output the run enters a recoverable `failed` state with `error_code`/`error_message` rather than crashing.
+- **Honest coverage.** The report view (`pages/reports/[id].vue`, `components/ReportItemCard.vue`, `components/EvidenceLink.vue`) shows the classification badge and confidence, links each cited span to a GitHub commit permalink at the immutable SHA, distinguishes observed from inferred, and shows an analysis-status/limitations area. Missing test evidence is described as "matching test evidence not found in analyzed context", never as "untested".
+
+### Live validation still required
+
+The following require a registry-enabled and network-enabled environment and could not be exercised in the authoring sandbox:
+
+1. Apply migrations: `supabase db push` (or run `0001_init.sql` then `0002_rls.sql`).
+2. Set env: copy `.env.example` to `.env` and fill values, including `NUXT_AI_API_KEY` (and optional `NUXT_AI_GATEWAY_BASE_URL`).
+3. Install and test: `unset NODE_OPTIONS && npm install && npm run test`.
+4. Build: `npm run build`.
+5. Run the slice end-to-end against a real JS/TS pull request (real GitHub App + AI provider + Supabase) and confirm the report renders a cited behavioral claim whose permalink resolves to the exact evidenced lines.
 
 ## Scripts
 

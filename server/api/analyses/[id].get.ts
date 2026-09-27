@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
   // RLS scopes this select to the requester's own runs.
   const { data: run, error: runErr } = await supabase
     .from('analysis_runs')
-    .select('id, status, coverage_status, coverage_notes, error_message, started_at, completed_at')
+    .select('id, status, workflow_version, model_id, coverage_status, coverage_notes, error_code, error_message, started_at, completed_at')
     .eq('id', id)
     .eq('requested_by', user.id)
     .maybeSingle()
@@ -80,15 +80,78 @@ export default defineEventHandler(async (event) => {
     permalink: s.permalink,
   }))
 
+  // Fast lookup from evidence key -> full span (for embedding citation spans on
+  // each report item so the report view can render clickable permalinks).
+  const spanByKey = new Map(evidence.map((e) => [e.evidenceKey, e]))
+
+  // Validated behavioral-change report items with their cited evidence spans.
+  // report_item_evidence joins to evidence_spans by id; we resolve back to the
+  // full span (including its immutable-SHA permalink) via the join select.
+  const { data: itemRows } = await supabase
+    .from('report_items')
+    .select(
+      'id, section, classification, title, statement, severity, confidence, sort_order, validation_status, metadata, ' +
+        'report_item_evidence(support_type, evidence_spans(evidence_key, commit_sha, file_path, side, start_line, end_line, excerpt, permalink))',
+    )
+    .eq('analysis_run_id', id)
+    .order('sort_order', { ascending: true })
+
+  const reportItems = (itemRows ?? []).map((row) => {
+    const joins = (row.report_item_evidence ?? []) as Array<{
+      support_type: string
+      evidence_spans: {
+        evidence_key: string
+        commit_sha: string
+        file_path: string | null
+        side: string
+        start_line: number | null
+        end_line: number | null
+        excerpt: string
+        permalink: string | null
+      } | null
+    }>
+    const citedEvidence = joins
+      .map((j) => j.evidence_spans)
+      .filter((s): s is NonNullable<typeof s> => Boolean(s))
+      .map((s) => ({
+        evidenceKey: s.evidence_key,
+        commitSha: s.commit_sha,
+        filePath: s.file_path,
+        side: s.side,
+        startLine: s.start_line,
+        endLine: s.end_line,
+        excerpt: s.excerpt,
+        // Prefer the persisted permalink; fall back to the run's span map.
+        permalink: s.permalink ?? spanByKey.get(s.evidence_key)?.permalink ?? null,
+      }))
+    return {
+      id: row.id,
+      section: row.section,
+      classification: row.classification,
+      title: row.title,
+      statement: row.statement,
+      severity: row.severity,
+      confidence: row.confidence,
+      sortOrder: row.sort_order,
+      validationStatus: row.validation_status,
+      metadata: row.metadata,
+      evidence: citedEvidence,
+    }
+  })
+
   return {
     analysisId: run.id,
     status: run.status as AnalysisRunStatus,
+    workflowVersion: run.workflow_version,
+    modelId: run.model_id,
     coverageStatus: run.coverage_status,
     coverageNotes: run.coverage_notes,
+    errorCode: run.error_code,
     errorMessage: run.error_message,
     startedAt: run.started_at,
     completedAt: run.completed_at,
     changeMap,
     evidence,
+    reportItems,
   }
 })

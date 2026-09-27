@@ -98,6 +98,19 @@ export async function assertUserOwnsInstallation(
   }
 }
 
+/**
+ * Read an error `code` string off a thrown value if present. The AI hook throws
+ * an AiAnalysisError carrying a typed code; we read it structurally to avoid a
+ * circular import between the orchestrator and the AI hook module.
+ */
+function readErrorCode(err: unknown): string | null {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const code = (err as { code?: unknown }).code
+    if (typeof code === 'string' && code.length > 0) return code
+  }
+  return null
+}
+
 /** Update the run status (best-effort; surfaces persistence errors). */
 async function setStatus(
   admin: SupabaseClient,
@@ -178,9 +191,26 @@ export async function runAnalysis(
 
     // 6. AI + validation hook (FEAT-003). When absent, stop deterministically.
     if (aiHook) {
-      await setStatus(admin, input.analysisRunId, 'ai')
-      await aiHook.run(result)
-      await setStatus(admin, input.analysisRunId, 'validating')
+      // A provider failure or malformed output must produce a RECOVERABLE
+      // failed state (error_code/error_message), never a crash and never a
+      // corrupt "complete" run. The hook throws an AiAnalysisError carrying a
+      // code; any other error is treated as an unexpected AI-stage failure.
+      try {
+        await setStatus(admin, input.analysisRunId, 'ai')
+        await aiHook.run(result)
+        await setStatus(admin, input.analysisRunId, 'validating')
+      }
+      catch (aiErr) {
+        const message = aiErr instanceof Error ? aiErr.message : String(aiErr)
+        const code = readErrorCode(aiErr) ?? 'ai_stage_error'
+        await setStatus(admin, input.analysisRunId, 'failed', {
+          error_code: code,
+          error_message: message,
+          coverage_status: 'partial',
+          completed_at: new Date().toISOString(),
+        }).catch(() => {})
+        return result
+      }
       await setStatus(admin, input.analysisRunId, 'complete', {
         completed_at: new Date().toISOString(),
         coverage_status: 'complete',
