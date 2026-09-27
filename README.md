@@ -1,0 +1,153 @@
+# PR Evidence Pack
+
+PR Evidence Pack is a read-only web application that turns a GitHub pull request into a cited review-preparation report. It maps stated intent, implementation changes, requirements, test evidence, CI checks, potential risks, and unresolved questions, always linking claims back to immutable source evidence, and without claiming to approve the code.
+
+This repository implements the first vertical slice of the plan (sign in, connect a read-only GitHub App, select a PR, ingest immutable artifacts, build a deterministic change map, produce one cited behavioral claim, validate the citation, and render a working commit permalink). Later milestones extend the same evidence model into requirements, risks, tests, and synthesis.
+
+## Framework note: Nuxt, not Next.js
+
+The authoritative plan (`../PR_EVIDENCE_PACK_IMPLEMENTATION_PLAN.md`) is written for Next.js. This implementation is a faithful translation to Nuxt 3 (Vue 3 plus the Nitro server), which was chosen because a server-side runtime is required for GitHub App token exchange, AI calls, and the Supabase service-role key, none of which may reach the browser. The mapping is:
+
+- Next.js `app/*/page.tsx` becomes Nuxt `pages/*.vue`.
+- Next.js `app/api/*/route.ts` becomes Nitro routes under `server/api/*`.
+- The plan's `lib/*` modules live under `server/utils/*` (Nitro auto-imports these).
+
+## Project structure
+
+```text
+nuxt.config.ts            Nuxt config, runtimeConfig (server-only secrets + public values)
+app.vue                   Root shell (NuxtLayout + NuxtPage)
+layouts/default.vue       App title + sign-out control
+pages/
+  index.vue               Redirects to /dashboard
+  login.vue               Magic-link sign in
+  dashboard.vue           Protected dashboard (auth middleware, empty/loading states)
+middleware/auth.ts        Redirects anonymous users to /login
+composables/useAuth.ts    Browser auth composable (current user, sign in, sign out)
+server/utils/supabase/
+  client.ts               Browser anon client boundary
+  server.ts               Per-request SSR client (reads auth cookies)
+  admin.ts                Service-role client (SERVER-ONLY, bypasses RLS)
+types/
+  github.ts               PR metadata, changed file, patch hunk, check result
+  analysis.ts             Artifact kind, run status, evidence span, change map
+  report.ts               Report item, classification union, behavioral claim, citation
+supabase/migrations/
+  0001_init.sql           Schema for the slice tables
+  0002_rls.sql            Row-level security: enable + owner-scoped policies
+```
+
+## Prerequisites
+
+- Node.js 20 or newer (Node 22 recommended; use `nvm use 22`).
+- npm (or another package manager) with access to the public npm registry.
+- A Supabase project (URL, anon key, and service-role key).
+- A read-only GitHub App (App id, private key, webhook secret, and public slug).
+- An AI provider or gateway API key (used in a later milestone).
+
+## Setup
+
+1. Install dependencies (requires npm registry access):
+
+   ```bash
+   npm install
+   ```
+
+   The `postinstall` script runs `nuxt prepare`, which generates `.nuxt/tsconfig.json` (referenced by `tsconfig.json`).
+
+2. Copy the example environment file and fill in real values:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Apply the database migrations to your Supabase project (see "Database migrations").
+
+4. Start the dev server:
+
+   ```bash
+   npm run dev
+   ```
+
+## Environment variables
+
+Nuxt maps environment variables onto `runtimeConfig`. `NUXT_*` variables are server-only; `NUXT_PUBLIC_*` variables are exposed to the browser. Never move a server-only secret into a `NUXT_PUBLIC_` variable.
+
+### Server-only secrets (owned by the backend / deployment operator)
+
+| Variable | Purpose |
+|---|---|
+| `NUXT_GITHUB_APP_ID` | GitHub App numeric id used to mint short-lived installation tokens server-side. |
+| `NUXT_GITHUB_APP_PRIVATE_KEY` | GitHub App private key (PEM). Never sent to the browser. |
+| `NUXT_GITHUB_WEBHOOK_SECRET` | Secret used to verify GitHub webhook payloads. |
+| `NUXT_SUPABASE_SERVICE_ROLE_KEY` | Supabase service-role key. Bypasses RLS; used only in `server/utils/supabase/admin.ts`. |
+| `NUXT_AI_API_KEY` | AI provider or gateway API key. |
+| `NUXT_AI_GATEWAY_BASE_URL` | Optional AI Gateway base URL. |
+
+### Public values (safe for the browser)
+
+| Variable | Purpose |
+|---|---|
+| `NUXT_PUBLIC_SUPABASE_URL` | Supabase project URL used by the browser anon client. |
+| `NUXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key. Public by design; RLS enforces per-user access. |
+| `NUXT_PUBLIC_APP_URL` | Public base URL of this app (used for auth redirects). |
+| `NUXT_PUBLIC_GITHUB_APP_SLUG` | GitHub App slug used to build the public install URL. |
+
+## Database migrations
+
+The schema and row-level security policies live in `supabase/migrations/`:
+
+- `0001_init.sql` creates the slice tables (profiles, github_installations, repositories, pull_requests, analysis_runs, artifacts, evidence_spans, report_items, report_item_evidence, check_results). No table stores a GitHub installation access token; short-lived tokens are minted server-side on demand and never persisted.
+- `0002_rls.sql` enables row-level security on every table and adds owner-scoped policies. Users can read only their own installations; repositories and pull requests are reachable via an owned installation; analysis runs are scoped to `requested_by = auth.uid()`; and artifacts, evidence spans, report items, report-item evidence, and check results derive access from the owning analysis run. The service-role key bypasses RLS and is used only server-side.
+
+Apply them with either the Supabase CLI or the SQL editor:
+
+```bash
+# Using the Supabase CLI (recommended)
+supabase db push
+
+# Or run each file in order in the Supabase SQL editor:
+#   0001_init.sql then 0002_rls.sql
+```
+
+## Supabase client boundaries
+
+There are three distinct Supabase clients, each with a clear trust boundary:
+
+1. `server/utils/supabase/client.ts`: browser anon client. Runs in the browser, uses the public anon key, constrained by RLS.
+2. `server/utils/supabase/server.ts`: per-request SSR client. Runs on the server, reads the request's auth cookies, uses the anon key, still constrained by RLS as the signed-in user.
+3. `server/utils/supabase/admin.ts`: service-role client. Server-only, bypasses RLS. Must never be imported into client code; always perform ownership checks yourself when using it.
+
+## Scripts
+
+| Script | Description |
+|---|---|
+| `npm run dev` | Start the Nuxt dev server. |
+| `npm run build` | Build for production (`nuxt build`). |
+| `npm run generate` | Static generation (`nuxt generate`). |
+| `npm run preview` | Preview a production build. |
+| `npm run test` | Run unit tests once (`vitest run`). |
+| `npm run test:watch` | Run unit tests in watch mode. |
+| `npm run typecheck` | Type-check with `nuxt typecheck`. |
+
+## Security posture
+
+- Secrets (GitHub App private key, Supabase service-role key, AI key) live only in server-only `runtimeConfig` and never in `runtimeConfig.public`.
+- GitHub integration is read-only. Installation access tokens are never persisted; they are minted server-side and short-lived.
+- Row-level security is enabled on every table so users cannot read one another's installations, analyses, or private repository content.
+- All repository content (PR text, patches, commit messages, file contents) is treated as untrusted data at the AI boundary; it is never treated as instructions.
+
+## Dependency versions
+
+Dependency versions in `package.json` are pinned to reasonable recent ranges. Exact versions may need small adjustments at install time depending on registry availability and peer-dependency resolution.
+
+## Sandbox limitations
+
+This project was authored in a sandbox with network mode `INTEGRATIONS_ONLY`. In that environment the npm registry returns HTTP 403 and there is no offline package cache, so the following could NOT be run during authoring and MUST be validated in an environment with npm registry access:
+
+- `npm install` (no packages could be fetched).
+- `nuxt prepare` / `nuxt build` (require installed dependencies).
+- `vitest` (requires installed dependencies).
+- Real Supabase, GitHub App, and AI provider network calls (no external network beyond the connected GitHub gateway).
+
+Every file here is hand-written so the project is complete and runnable once dependencies are installed in a registry-enabled environment. Please run `npm install`, `npm run build`, and `npm run test` there to complete verification.

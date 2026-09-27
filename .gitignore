@@ -1,0 +1,23 @@
+# Dependencies
+node_modules
+
+# Nuxt build output
+.nuxt
+.output
+.data
+dist
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Test / coverage
+coverage
+
+# Logs
+*.log
+logs
+
+# OS files
+.DS_Store

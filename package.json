@@ -1,0 +1,36 @@
+{
+  "name": "pr-evidence-pack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only tool that turns a GitHub pull request into a cited review-preparation report.",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "nuxt typecheck"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^0.0.66",
+    "@octokit/auth-app": "^7.1.1",
+    "@octokit/rest": "^21.0.2",
+    "@supabase/ssr": "^0.5.1",
+    "@supabase/supabase-js": "^2.45.4",
+    "ai": "^3.4.7",
+    "nuxt": "^3.13.2",
+    "vue": "^3.5.11",
+    "vue-router": "^4.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@nuxt/test-utils": "^3.14.2",
+    "@vue/test-utils": "^2.4.6",
+    "happy-dom": "^15.7.4",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.2"
+  }
+}
