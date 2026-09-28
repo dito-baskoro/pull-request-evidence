@@ -7,8 +7,8 @@
 //
 // The `BehaviorAnalyzer` interface lets callers (and tests) inject a fake
 // analyzer, so the whole pipeline can be exercised with no network access. The
-// default implementation uses the Vercel AI SDK `generateObject` constrained by
-// the strict Zod schema, with the provider/key read from SERVER-ONLY
+// default implementation uses the portable AI SDK `generateObject` API,
+// constrained by the strict Zod schema, with the provider/key read from SERVER-ONLY
 // runtimeConfig (aiApiKey / aiGatewayBaseUrl).
 
 import { generateObject } from 'ai'

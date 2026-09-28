@@ -22,7 +22,8 @@
 // request blocks until the run reaches a terminal state. The plan describes an
 // async run with status polling (GET /api/analyses/:id already exists for it),
 // which a later milestone should adopt by moving this call off the request
-// path (queue/worker) so a large PR or slow model does not tie up the request.
+// path (for example, to a background queue consumer) so a large PR or slow
+// model does not tie up the request.
 // It is kept inline here because the slice only needs one end-to-end run and
 // the synchronous path keeps the vertical slice easy to reason about and test.
 // Re-ingestion is made idempotent (see clearRunScopedRows) so re-running the

@@ -9,6 +9,8 @@
     "build": "nuxt build",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
+    "preview:cloudflare": "npm run build && wrangler dev",
+    "deploy:cloudflare": "npm run build && wrangler deploy",
     "postinstall": "nuxt prepare",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -21,7 +23,7 @@
     "@supabase/ssr": "^0.5.1",
     "@supabase/supabase-js": "^2.45.4",
     "ai": "^3.4.7",
-    "nuxt": "^3.13.2",
+    "nuxt": "^3.17.5",
     "vue": "^3.5.11",
     "vue-router": "^4.4.5",
     "zod": "^3.23.8"
@@ -31,6 +33,7 @@
     "@vue/test-utils": "^2.4.6",
     "happy-dom": "^15.7.4",
     "typescript": "^5.6.2",
-    "vitest": "^2.1.2"
+    "vitest": "^2.1.2",
+    "wrangler": "^4.68.0"
   }
 }
