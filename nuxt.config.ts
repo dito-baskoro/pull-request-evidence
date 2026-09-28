@@ -9,7 +9,7 @@
 //
 // See README.md ("Environment variables") for ownership of each value.
 export default defineNuxtConfig({
-  compatibilityDate: '2024-09-01',
+  compatibilityDate: '2025-09-19',
 
   typescript: {
     strict: true,
@@ -35,6 +35,14 @@ export default defineNuxtConfig({
   },
 
   nitro: {
+    // Emit a dynamic Cloudflare Module Worker; server/api routes remain runtime routes.
+    preset: 'cloudflare-module',
+    cloudflare: {
+      // Generate the output-specific Wrangler entrypoint/assets config at build time.
+      deployConfig: true,
+      // Required by Octokit/GitHub App JWT signing and existing Node crypto usage.
+      nodeCompat: true,
+    },
     // The service-role Supabase client must only ever run on the server.
     // Nitro auto-imports helpers from server/utils.
   },

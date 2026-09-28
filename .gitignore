@@ -7,9 +7,13 @@ node_modules
 .data
 dist
 
+# Cloudflare generated deployment and local state
+.wrangler
+
 # Environment
 .env
 .env.*
+.dev.vars
 !.env.example
 
 # Test / coverage
