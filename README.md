@@ -132,6 +132,8 @@ Nuxt maps environment variables onto `runtimeConfig`. `NUXT_*` variables are ser
 
 ## Deploy to Cloudflare Workers
 
+For a detailed walkthrough, see the [Cloudflare Workers setup guide](docs/cloudflare-setup.md).
+
 The production target is a dynamic Cloudflare Module Worker, not a statically generated site. `nuxt.config.ts` selects Nitro's `cloudflare-module` preset and enables Nitro's generated deployment configuration. During `npm run build`, Nitro writes the output-specific Worker entrypoint and static-assets binding; the checked-in `wrangler.jsonc` supplies the stable Worker name, compatibility date, compatibility flags, and `workers.dev` setting. It also sets `keep_vars` so Wrangler deployments preserve the plaintext variables managed in the Cloudflare dashboard. The Worker compatibility date is later than `2024-09-19`, as required by Nuxt on Workers. Its `nodejs_compat` flag is required by the existing Octokit/GitHub App JWT path and direct `node:crypto`/`Buffer` usage. Do not use `npm run generate` for deployment: the Nitro API routes under `server/api/` must remain dynamic.
 
 1. Create a [Cloudflare account](https://dash.cloudflare.com/sign-up), enable Workers, and authenticate Wrangler:
