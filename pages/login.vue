@@ -29,73 +29,81 @@ async function onSubmit() {
 
 <template>
   <section class="login">
-    <h1>Sign in</h1>
-    <p class="login-lead">
-      Enter your email and we will send you a magic sign-in link.
-    </p>
+    <div class="panel login-card">
+      <p class="eyebrow">PR Evidence Pack</p>
+      <h1 class="login-title">Sign in</h1>
+      <p class="login-lead">
+        Enter your email and we will send you a magic sign-in link.
+      </p>
 
-    <form class="login-form" @submit.prevent="onSubmit">
-      <label for="email">Email</label>
-      <input
-        id="email"
-        v-model="email"
-        type="email"
-        required
-        autocomplete="email"
-        placeholder="you@example.com"
-      >
-      <button type="submit" :disabled="status === 'sending'">
-        {{ status === 'sending' ? 'Sending...' : 'Send magic link' }}
-      </button>
-    </form>
+      <form class="login-form" @submit.prevent="onSubmit">
+        <label for="email">Email</label>
+        <input
+          id="email"
+          v-model="email"
+          type="email"
+          required
+          autocomplete="email"
+          placeholder="you@example.com"
+        >
+        <button type="submit" class="btn btn-primary login-submit" :disabled="status === 'sending'">
+          {{ status === 'sending' ? 'Sending\u2026' : 'Send magic link' }}
+        </button>
+      </form>
 
-    <p v-if="status === 'sent'" class="login-ok">
-      Check your inbox for a sign-in link.
-    </p>
-    <p v-if="status === 'error'" class="login-error">
-      {{ errorMessage }}
-    </p>
+      <p v-if="status === 'sent'" class="notice notice-ok login-msg" role="status">
+        Check your inbox for a sign-in link.
+      </p>
+      <p v-if="status === 'error'" class="notice notice-err login-msg" role="alert">
+        {{ errorMessage }}
+      </p>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .login {
-  max-width: 380px;
+  max-width: 420px;
   margin: 3rem auto;
 }
+.login-card {
+  padding: 1.75rem;
+}
+.login-title {
+  font-size: var(--step2);
+  margin: 0.35rem 0 0.4rem;
+}
 .login-lead {
-  color: #555;
+  color: var(--c-ink-soft);
+  margin: 0;
 }
 .login-form {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 1rem;
+  gap: 0.4rem;
+  margin-top: 1.25rem;
+}
+.login-form label {
+  font-size: var(--step-1);
+  font-weight: 600;
+  color: var(--c-ink-soft);
 }
 .login-form input {
-  padding: 0.5rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
+  font: inherit;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface);
 }
-.login-form button {
-  margin-top: 0.5rem;
-  padding: 0.5rem;
-  border: none;
-  border-radius: 6px;
-  background: #1a1a1a;
-  color: #fff;
-  cursor: pointer;
+.login-form input:focus {
+  outline: none;
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px var(--c-accent-tint);
 }
-.login-form button:disabled {
-  opacity: 0.6;
-  cursor: default;
+.login-submit {
+  margin-top: 0.6rem;
 }
-.login-ok {
-  color: #157347;
-  margin-top: 1rem;
-}
-.login-error {
-  color: #b02a37;
+.login-msg {
   margin-top: 1rem;
 }
 </style>

@@ -16,6 +16,10 @@ export default defineNuxtConfig({
     typeCheck: false,
   },
 
+  // Global design tokens + base styles + reusable primitives (chips, buttons,
+  // panels). Components consume these tokens rather than hard-coding colors.
+  css: ['~/assets/css/app.css'],
+
   runtimeConfig: {
     // SERVER-ONLY secrets. Do NOT move any of these under `public`.
     githubAppId: '', // NUXT_GITHUB_APP_ID
