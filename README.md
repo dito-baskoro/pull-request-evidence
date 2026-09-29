@@ -79,7 +79,7 @@ test/
 - npm (or another package manager) with access to the public npm registry.
 - A Cloudflare account with Workers enabled. Wrangler is installed as a project dev dependency.
 - A Supabase project (URL, anon key, and service-role key); Supabase continues to provide Auth, Postgres, and Storage.
-- A read-only GitHub App (App id, private key, webhook secret, and public slug).
+- A read-only GitHub App (App id, private key, webhook secret, and public slug). See the [GitHub App setup guide](docs/github-app-setup.md).
 - An AI provider or gateway API key (used in a later milestone).
 
 ## Setup
@@ -132,7 +132,7 @@ Nuxt maps environment variables onto `runtimeConfig`. `NUXT_*` variables are ser
 
 ## Deploy to Cloudflare Workers
 
-For a detailed walkthrough, see the [Cloudflare Workers setup guide](docs/cloudflare-setup.md).
+For detailed walkthroughs, see the [Cloudflare Workers setup guide](docs/cloudflare-setup.md) and the [GitHub App setup guide](docs/github-app-setup.md).
 
 The production target is a dynamic Cloudflare Module Worker, not a statically generated site. `nuxt.config.ts` selects Nitro's `cloudflare-module` preset and enables Nitro's generated deployment configuration. During `npm run build`, Nitro writes the output-specific Worker entrypoint and static-assets binding; the checked-in `wrangler.jsonc` supplies the stable Worker name, compatibility date, compatibility flags, and `workers.dev` setting. It also sets `keep_vars` so Wrangler deployments preserve the plaintext variables managed in the Cloudflare dashboard. The Worker compatibility date is later than `2024-09-19`, as required by Nuxt on Workers. Its `nodejs_compat` flag is required by the existing Octokit/GitHub App JWT path and direct `node:crypto`/`Buffer` usage. Do not use `npm run generate` for deployment: the Nitro API routes under `server/api/` must remain dynamic.
 
