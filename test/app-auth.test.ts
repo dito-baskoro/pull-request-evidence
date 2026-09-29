@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizePrivateKey } from '~/server/utils/github/app-auth'
+import { normalizePrivateKey } from '~/server/utils/github/private-key'
 
 // normalizePrivateKey is pure and does not touch Nitro auto-imports, so it can
 // be unit-tested directly. It must recover keys mangled by an environment or

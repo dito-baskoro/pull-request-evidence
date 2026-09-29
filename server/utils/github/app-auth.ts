@@ -14,6 +14,7 @@
 
 import { createAppAuth } from '@octokit/auth-app'
 import { Octokit } from '@octokit/rest'
+import { preparePrivateKey } from './private-key'
 
 /** A minted installation token plus its expiry. Never persisted or logged. */
 export interface InstallationToken {
@@ -21,37 +22,8 @@ export interface InstallationToken {
   expiresAt: string
 }
 
-/**
- * Normalize a GitHub App private key that may have been mangled by an
- * environment/secret store. Handles, in order:
- *   - surrounding single or double quotes (dashboards sometimes keep them),
- *   - literal escaped "\n" sequences (the value became a single line),
- *   - CRLF line endings ("\r\n" -> "\n"),
- *   - stray leading/trailing whitespace.
- * A key that is already a well-formed multiline PEM passes through unchanged
- * (aside from trimming). The key material itself is never logged.
- */
-export function normalizePrivateKey(raw: string): string {
-  let key = raw.trim()
-  // Strip a single pair of surrounding quotes if present.
-  if (
-    (key.startsWith('"') && key.endsWith('"'))
-    || (key.startsWith('\'') && key.endsWith('\''))
-  ) {
-    key = key.slice(1, -1)
-  }
-  // Convert literal escaped newlines to real newlines (single-line keys).
-  key = key.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n')
-  // Normalize CRLF to LF.
-  key = key.replace(/\r\n/g, '\n')
-  return key.trim()
-}
-
-/** True when the value looks like a PEM (has BEGIN/END markers). */
-function looksLikePem(key: string): boolean {
-  return /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(key)
-    && /-----END [A-Z ]*PRIVATE KEY-----/.test(key)
-}
+// Re-exported for existing callers/tests.
+export { normalizePrivateKey } from './private-key'
 
 function readAppCredentials(): { appId: string; privateKey: string } {
   const config = useRuntimeConfig()
@@ -68,11 +40,17 @@ function readAppCredentials(): { appId: string; privateKey: string } {
       'GitHub App credentials are invalid: NUXT_GITHUB_APP_ID must be the numeric App ID (not the Client ID). See docs/github-app-setup.md.',
     )
   }
-  const privateKey = normalizePrivateKey(String(rawPrivateKey))
-  if (!looksLikePem(privateKey)) {
-    // Never include the key material in the message.
+  // Normalize mangling and convert GitHub's PKCS#1 download to PKCS#8, which
+  // WebCrypto (used for JWT signing on Cloudflare Workers) requires. Throws a
+  // secret-free, actionable error when the key cannot be used.
+  let privateKey: string
+  try {
+    privateKey = preparePrivateKey(String(rawPrivateKey))
+  }
+  catch (err) {
+    const reason = err instanceof Error ? err.message : 'unknown key error'
     throw new Error(
-      'GitHub App credentials are invalid: NUXT_GITHUB_APP_PRIVATE_KEY is not a valid PEM (missing BEGIN/END markers). Set it by piping the .pem file, not by pasting. See docs/github-app-setup.md.',
+      `GitHub App credentials are invalid: NUXT_GITHUB_APP_PRIVATE_KEY cannot be used (${reason}) See docs/github-app-setup.md.`,
     )
   }
   return { appId: String(appId).trim(), privateKey }
