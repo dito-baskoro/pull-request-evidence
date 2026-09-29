@@ -111,6 +111,14 @@ npx wrangler secret put NUXT_SUPABASE_SERVICE_ROLE_KEY
 npx wrangler secret put NUXT_AI_API_KEY
 ```
 
+Set the connect-state signing secret too. Generate a random value and pipe it in:
+
+```bash
+openssl rand -hex 32 | npx wrangler secret put NUXT_GITHUB_CONNECT_STATE_SECRET
+```
+
+This secret signs the per-user `state` token that binds a GitHub App connect to the signed-in user who initiated it (see the [GitHub App setup guide](github-app-setup.md)). If it is unset, the dashboard hides the "Connect GitHub App" link rather than issue an unverifiable one.
+
 For the multi-line GitHub PEM, pipe the file so line breaks are preserved:
 
 ```bash
@@ -127,6 +135,8 @@ In the Supabase dashboard: **Authentication -> URL Configuration**:
 - Redirect URLs: add `<NUXT_PUBLIC_APP_URL>/dashboard`.
 
 Otherwise magic-link/OAuth logins will not return to your app. Your Supabase database, migrations, and RLS stay unchanged; Cloudflare only replaces the host.
+
+While configuring URLs, set the GitHub App **Setup URL** to `<NUXT_PUBLIC_APP_URL>/dashboard` so it stays consistent with `NUXT_PUBLIC_APP_URL` in production. After an install, GitHub redirects to that path with `installation_id` and `setup_action` query parameters and the dashboard records the installation for the signed-in owner (read-only, no token persisted). If the Setup URL and `NUXT_PUBLIC_APP_URL` diverge, the dashboard keeps showing "No GitHub App connected yet". See the [GitHub App setup guide](github-app-setup.md) for details.
 
 ## Step 9: Apply database migrations (if not already done)
 
