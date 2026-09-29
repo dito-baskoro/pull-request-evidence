@@ -256,6 +256,42 @@ describe('persistInstallation', () => {
     expect(calls).toHaveLength(0)
   })
 
+  it('maps a 401 credential failure to an actionable credentials message', async () => {
+    const calls: UpsertCall[] = []
+    const supabase = fakeSupabase(calls)
+    const appOctokit = throwingAppOctokit(401)
+
+    await expect(
+      persistInstallation({ supabase, appOctokit, userId: 'user-1', installationId: 1 }),
+    ).rejects.toMatchObject({ statusCode: 502, message: /credentials appear to be invalid/i })
+
+    expect(calls).toHaveLength(0)
+  })
+
+  it('maps a 403 permission failure to the actionable credentials message', async () => {
+    const calls: UpsertCall[] = []
+    const supabase = fakeSupabase(calls)
+    const appOctokit = throwingAppOctokit(403)
+
+    await expect(
+      persistInstallation({ supabase, appOctokit, userId: 'user-1', installationId: 1 }),
+    ).rejects.toMatchObject({ message: /credentials appear to be invalid/i })
+
+    expect(calls).toHaveLength(0)
+  })
+
+  it('keeps the generic 502 message for unknown/transient (500) failures', async () => {
+    const calls: UpsertCall[] = []
+    const supabase = fakeSupabase(calls)
+    const appOctokit = throwingAppOctokit(500)
+
+    await expect(
+      persistInstallation({ supabase, appOctokit, userId: 'user-1', installationId: 1 }),
+    ).rejects.toMatchObject({ statusCode: 502, message: /please try again/i })
+
+    expect(calls).toHaveLength(0)
+  })
+
   it('rejects a null account rather than persisting a blank login', async () => {
     const calls: UpsertCall[] = []
     const supabase = fakeSupabase(calls)

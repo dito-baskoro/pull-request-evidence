@@ -21,17 +21,61 @@ export interface InstallationToken {
   expiresAt: string
 }
 
+/**
+ * Normalize a GitHub App private key that may have been mangled by an
+ * environment/secret store. Handles, in order:
+ *   - surrounding single or double quotes (dashboards sometimes keep them),
+ *   - literal escaped "\n" sequences (the value became a single line),
+ *   - CRLF line endings ("\r\n" -> "\n"),
+ *   - stray leading/trailing whitespace.
+ * A key that is already a well-formed multiline PEM passes through unchanged
+ * (aside from trimming). The key material itself is never logged.
+ */
+export function normalizePrivateKey(raw: string): string {
+  let key = raw.trim()
+  // Strip a single pair of surrounding quotes if present.
+  if (
+    (key.startsWith('"') && key.endsWith('"'))
+    || (key.startsWith('\'') && key.endsWith('\''))
+  ) {
+    key = key.slice(1, -1)
+  }
+  // Convert literal escaped newlines to real newlines (single-line keys).
+  key = key.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n')
+  // Normalize CRLF to LF.
+  key = key.replace(/\r\n/g, '\n')
+  return key.trim()
+}
+
+/** True when the value looks like a PEM (has BEGIN/END markers). */
+function looksLikePem(key: string): boolean {
+  return /-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(key)
+    && /-----END [A-Z ]*PRIVATE KEY-----/.test(key)
+}
+
 function readAppCredentials(): { appId: string; privateKey: string } {
   const config = useRuntimeConfig()
   const appId = config.githubAppId
-  const privateKey = config.githubAppPrivateKey
-  if (!appId || !privateKey) {
+  const rawPrivateKey = config.githubAppPrivateKey
+  if (!appId || !rawPrivateKey) {
     throw new Error(
       'Missing NUXT_GITHUB_APP_ID or NUXT_GITHUB_APP_PRIVATE_KEY (server-only). See .env.example.',
     )
   }
-  // Support keys provided with literal "\n" escapes in the environment.
-  return { appId, privateKey: privateKey.replace(/\\n/g, '\n') }
+  // The App id must be the numeric App ID (not the Client ID).
+  if (!/^\d+$/.test(String(appId).trim())) {
+    throw new Error(
+      'GitHub App credentials are invalid: NUXT_GITHUB_APP_ID must be the numeric App ID (not the Client ID). See docs/github-app-setup.md.',
+    )
+  }
+  const privateKey = normalizePrivateKey(String(rawPrivateKey))
+  if (!looksLikePem(privateKey)) {
+    // Never include the key material in the message.
+    throw new Error(
+      'GitHub App credentials are invalid: NUXT_GITHUB_APP_PRIVATE_KEY is not a valid PEM (missing BEGIN/END markers). Set it by piping the .pem file, not by pasting. See docs/github-app-setup.md.',
+    )
+  }
+  return { appId: String(appId).trim(), privateKey }
 }
 
 /**

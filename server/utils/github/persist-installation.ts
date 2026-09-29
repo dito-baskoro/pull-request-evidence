@@ -56,6 +56,32 @@ function readErrorStatus(err: unknown): number | undefined {
 }
 
 /**
+ * Read a short error name for diagnostics. Reads only the `name` field; never
+ * inspects tokens, headers, or the full error object.
+ */
+function readErrorName(err: unknown): string {
+  if (err && typeof err === 'object' && 'name' in err) {
+    const name = (err as { name?: unknown }).name
+    if (typeof name === 'string') return name
+  }
+  return 'Error'
+}
+
+/**
+ * Read a short, truncated error message for diagnostics. GitHub/Octokit error
+ * messages describe the failure (e.g. "Bad credentials") without embedding the
+ * private key or token; we still cap the length defensively and never log any
+ * other field.
+ */
+function readErrorMessage(err: unknown): string {
+  if (err && typeof err === 'object' && 'message' in err) {
+    const message = (err as { message?: unknown }).message
+    if (typeof message === 'string') return message.slice(0, 200)
+  }
+  return 'unknown error'
+}
+
+/**
  * Minimal shape of the SSR Supabase client this helper needs: an owner-scoped
  * upsert on github_installations returning the persisted row.
  */
@@ -170,15 +196,33 @@ export async function persistInstallation(
       throw err
     }
     // Distinguish a genuine "installation not found" (404) from other upstream
-    // failures (5xx, rate limit, credential/auth problems). Octokit REST errors
-    // expose a numeric `status`. Non-404 failures propagate as 502 with a
-    // message that does not claim the installation is missing. No token or
-    // secret is read from the error, so nothing sensitive is logged or leaked.
+    // failures. Octokit REST errors expose a numeric `status`. We read ONLY the
+    // status, error name, and a short message string; we never read tokens,
+    // headers, the App JWT, or the full error object, so nothing sensitive is
+    // logged or leaked.
     const status = readErrorStatus(err)
+
+    // Server-side diagnostic so `wrangler tail` shows the real cause. Sanitized:
+    // status + name + short message only.
+    console.error('[github connect] getInstallation failed', {
+      status: status ?? 'none',
+      name: readErrorName(err),
+      message: readErrorMessage(err),
+    })
+
     if (status === 404) {
       throw new PersistInstallationError(
         404,
         'GitHub installation not found or not accessible by this app.',
+      )
+    }
+    // 401/403 are credential/permission problems (bad App ID, malformed private
+    // key, or the app lacking access), not transient. Surface an actionable
+    // message without leaking any secret.
+    if (status === 401 || status === 403) {
+      throw new PersistInstallationError(
+        502,
+        'GitHub App credentials appear to be invalid. Verify NUXT_GITHUB_APP_ID and NUXT_GITHUB_APP_PRIVATE_KEY, and see docs/github-app-setup.md.',
       )
     }
     throw new PersistInstallationError(

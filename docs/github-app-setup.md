@@ -175,6 +175,17 @@ If installations do not appear, first confirm the GitHub App **Setup URL** is se
 - **Dashboard still shows "No GitHub App connected yet" after installing:** the GitHub App **Setup URL** is missing or does not point at `<NUXT_PUBLIC_APP_URL>/dashboard`, so GitHub never redirected back with the `installation_id`, `setup_action`, and `state` parameters that record the installation. Set the Setup URL to `<NUXT_PUBLIC_APP_URL>/dashboard`, confirm it matches `NUXT_PUBLIC_APP_URL`, then install again while signed in.
 - **"This GitHub connection link is invalid or has expired":** the `state` token failed verification. This happens when the link was opened long after it was issued (the token is short-lived, about 15 minutes), when it was reused across accounts, or when `NUXT_GITHUB_CONNECT_STATE_SECRET` changed between issuing and verifying. Start the connection again from the dashboard so a fresh `state` is issued.
 - **"Connect GitHub App" link does not appear:** `NUXT_PUBLIC_GITHUB_APP_SLUG` or `NUXT_GITHUB_CONNECT_STATE_SECRET` is unset. The server fails closed and hides the link rather than issue one without a verifiable `state`.
+- **502 "Could not verify the GitHub installation with GitHub" or "GitHub App credentials appear to be invalid":** the server could not authenticate to GitHub as the app, so signing the App JWT or the `getInstallation` lookup failed. This is almost always a credential problem in the deployment environment:
+  - Watch the live logs while reproducing: `npx wrangler tail`. The server logs the sanitized upstream status and message (for example `401 Bad credentials`), which pinpoints the cause. No key or token is logged.
+  - Set the private key by **piping the `.pem` file**, never by pasting it, so newlines are preserved:
+
+    ```bash
+    npx wrangler secret put NUXT_GITHUB_APP_PRIVATE_KEY < /secure/path/github-app-private-key.pem
+    ```
+
+    The app normalizes keys stored with escaped `\n`, surrounding quotes, or CRLF, but a key with lost line structure cannot be recovered.
+  - Confirm `NUXT_GITHUB_APP_ID` is the **numeric App ID** from the app's About page, not the Client ID.
+  - Confirm the app is installed on the account whose installation you are connecting.
 
 ## Reference documentation
 
