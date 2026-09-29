@@ -73,6 +73,82 @@ const { data: repoData, pending: repoPending } = await useAsyncData(
 )
 const repositories = computed(() => repoData.value?.repositories ?? [])
 
+// Repository selection. Repositories are live-fetched with a blank id, so
+// selecting one persists it (POST /api/github/repositories) to obtain the
+// stored uuid the pulls/analyses endpoints require. The uuid is keyed by the
+// GitHub repository id so re-selecting is cheap and idempotent.
+const selectedGithubRepoId = ref<number | null>(null)
+const selectedRepositoryId = ref<string | null>(null)
+const repoSelectPending = ref(false)
+const repoError = ref('')
+
+// Open pull requests for the selected (persisted) repository.
+const pulls = ref<Array<{ number: number; title: string; authorLogin: string | null; headSha: string }>>([])
+const pullsPending = ref(false)
+
+// Per-PR "Run analysis" in-flight number (the pipeline runs synchronously).
+const analyzingPr = ref<number | null>(null)
+
+async function selectRepository(repo: { githubRepositoryId: number; installationId: string }) {
+  repoError.value = ''
+  selectedGithubRepoId.value = repo.githubRepositoryId
+  selectedRepositoryId.value = null
+  pulls.value = []
+  repoSelectPending.value = true
+  try {
+    const { repository } = await $fetch('/api/github/repositories', {
+      method: 'POST',
+      body: {
+        installationId: repo.installationId,
+        githubRepositoryId: repo.githubRepositoryId,
+      },
+    })
+    selectedRepositoryId.value = repository.id
+    await loadPulls(repository.id)
+  }
+  catch (err: any) {
+    repoError.value = errorMessage(err, 'Could not open this repository.')
+  }
+  finally {
+    repoSelectPending.value = false
+  }
+}
+
+async function loadPulls(repositoryId: string) {
+  pullsPending.value = true
+  try {
+    const res = await $fetch('/api/github/pulls', { query: { repositoryId } })
+    pulls.value = res.pulls ?? []
+  }
+  catch (err: any) {
+    repoError.value = errorMessage(err, 'Could not load pull requests.')
+  }
+  finally {
+    pullsPending.value = false
+  }
+}
+
+async function runAnalysis(pullRequestNumber: number) {
+  if (!selectedRepositoryId.value) return
+  repoError.value = ''
+  analyzingPr.value = pullRequestNumber
+  try {
+    const { analysisId } = await $fetch('/api/analyses', {
+      method: 'POST',
+      body: { repositoryId: selectedRepositoryId.value, pullRequestNumber },
+    })
+    await navigateTo(`/analyses/${analysisId}`)
+  }
+  catch (err: any) {
+    repoError.value = errorMessage(err, 'Analysis failed. Please try again.')
+    analyzingPr.value = null
+  }
+}
+
+function errorMessage(err: any, fallback: string): string {
+  return err?.data?.statusMessage || err?.statusMessage || err?.message || fallback
+}
+
 // The "Connect GitHub App" link uses a server-issued install URL that carries a
 // per-user state token (GET /api/github/connect signs it bound to the signed-in
 // user). GitHub echoes the token back on the setup redirect, and the connect
@@ -131,13 +207,55 @@ const installUrl = computed(() => connectData.value?.installUrl || null)
 
         <template v-if="selectedInstallationId">
           <h2>Repositories</h2>
+          <p class="dashboard-note">Select a repository to list its open pull requests.</p>
           <p v-if="repoPending" class="dashboard-loading">Loading repositories...</p>
           <ul v-else class="dashboard-repos">
             <li v-for="repo in repositories" :key="repo.githubRepositoryId">
-              {{ repo.owner }}/{{ repo.name }}
-              <span v-if="repo.isPrivate" class="repo-private">private</span>
+              <button
+                type="button"
+                class="repo-button"
+                :class="{ active: selectedGithubRepoId === repo.githubRepositoryId }"
+                :disabled="repoSelectPending && selectedGithubRepoId === repo.githubRepositoryId"
+                @click="selectRepository(repo)"
+              >
+                {{ repo.owner }}/{{ repo.name }}
+                <span v-if="repo.isPrivate" class="repo-private">private</span>
+                <span
+                  v-if="repoSelectPending && selectedGithubRepoId === repo.githubRepositoryId"
+                  class="repo-loading"
+                >opening...</span>
+              </button>
             </li>
           </ul>
+
+          <p v-if="repoError" class="dashboard-banner dashboard-banner-error" role="alert">
+            {{ repoError }}
+          </p>
+
+          <template v-if="selectedGithubRepoId && !repoSelectPending">
+            <h2>Open pull requests</h2>
+            <p v-if="pullsPending" class="dashboard-loading">Loading pull requests...</p>
+            <ul v-else-if="pulls.length" class="dashboard-pulls">
+              <li v-for="pr in pulls" :key="pr.number">
+                <div class="pull-meta">
+                  <span class="pull-number">#{{ pr.number }}</span>
+                  <span class="pull-title">{{ pr.title }}</span>
+                  <span v-if="pr.authorLogin" class="pull-author">by {{ pr.authorLogin }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="pull-analyze"
+                  :disabled="analyzingPr !== null"
+                  @click="runAnalysis(pr.number)"
+                >
+                  {{ analyzingPr === pr.number ? 'Analyzing...' : 'Run analysis' }}
+                </button>
+              </li>
+            </ul>
+            <p v-else-if="selectedRepositoryId" class="dashboard-note">
+              No open pull requests found for this repository.
+            </p>
+          </template>
         </template>
       </template>
     </template>
@@ -203,7 +321,75 @@ const installUrl = computed(() => connectData.value?.installUrl || null)
   background: #eef4ff;
 }
 .dashboard-repos li {
-  padding: 0.25rem 0;
+  padding: 0.15rem 0;
+}
+.dashboard-note {
+  color: #666;
+  font-size: 0.9rem;
+  margin: 0.25rem 0 0.5rem;
+}
+.repo-button {
+  cursor: pointer;
+  border: 1px solid #ccc;
+  background: #fff;
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  text-align: left;
+}
+.repo-button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.repo-button.active {
+  border-color: #1a73e8;
+  background: #eef4ff;
+}
+.repo-loading {
+  color: #777;
+  font-size: 0.75rem;
+  margin-left: 0.4rem;
+}
+.dashboard-pulls {
+  list-style: none;
+  padding: 0;
+}
+.dashboard-pulls li {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #f0f0f0;
+  flex-wrap: wrap;
+}
+.pull-meta {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.pull-number {
+  font-family: monospace;
+  color: #555;
+}
+.pull-title {
+  font-weight: 500;
+}
+.pull-author {
+  color: #777;
+  font-size: 0.8rem;
+}
+.pull-analyze {
+  cursor: pointer;
+  border: 1px solid #1a73e8;
+  background: #1a73e8;
+  color: #fff;
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+}
+.pull-analyze:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 .repo-private {
   font-size: 0.7rem;
