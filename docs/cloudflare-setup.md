@@ -11,7 +11,7 @@ Before starting, make sure you have:
 - Node.js 20 or newer (Node 22 recommended; `nvm use 22`).
 - A Cloudflare account ([sign up](https://dash.cloudflare.com/sign-up)).
 - Your existing Supabase project (project URL, anon key, service-role key).
-- A read-only GitHub App (App ID, private key `.pem`, public slug).
+- A read-only GitHub App (App ID, private key `.pem`, public slug). See the [GitHub App setup guide](github-app-setup.md).
 - An AI provider API key (OpenAI, or a compatible/gateway endpoint).
 
 ## Step 1: Get the code and install dependencies
