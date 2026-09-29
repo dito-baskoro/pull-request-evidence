@@ -21,6 +21,7 @@ export default defineNuxtConfig({
     githubAppId: '', // NUXT_GITHUB_APP_ID
     githubAppPrivateKey: '', // NUXT_GITHUB_APP_PRIVATE_KEY (PEM, server-only)
     githubWebhookSecret: '', // NUXT_GITHUB_WEBHOOK_SECRET
+    githubConnectStateSecret: '', // NUXT_GITHUB_CONNECT_STATE_SECRET (signs the per-user connect state)
     supabaseServiceRoleKey: '', // NUXT_SUPABASE_SERVICE_ROLE_KEY (bypasses RLS)
     aiApiKey: '', // NUXT_AI_API_KEY
     aiGatewayBaseUrl: '', // NUXT_AI_GATEWAY_BASE_URL (optional gateway endpoint)

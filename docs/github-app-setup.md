@@ -26,7 +26,11 @@ The App ID is a public identifier. The private key is secret and must stay serve
    - **Callback URL:** not required for the current Supabase-based login flow.
    - **Setup URL (after installation):** set this to `<NUXT_PUBLIC_APP_URL>/dashboard`, using `http://localhost:3000/dashboard` for local development or `https://<your-app>/dashboard` in production. If **Redirect on update after installation** is available, enable it so updates return to the same `/dashboard` path.
 
-After a user installs or updates the app, GitHub redirects the browser to this Setup URL and appends `installation_id` and `setup_action` query parameters. The dashboard reads those parameters and records the installation for the signed-in user, so the person who completes the install becomes the owner of that installation. This is what persists the connection so the dashboard stops showing "No GitHub App connected yet". The Setup URL must stay consistent with `NUXT_PUBLIC_APP_URL` and always point at the `/dashboard` path.
+After a user installs or updates the app, GitHub redirects the browser to this Setup URL and appends `installation_id`, `setup_action`, and the `state` query parameter that the dashboard's "Connect GitHub App" link carried. The dashboard reads those parameters and records the installation for the signed-in user. This is what persists the connection so the dashboard stops showing "No GitHub App connected yet". The Setup URL must stay consistent with `NUXT_PUBLIC_APP_URL` and always point at the `/dashboard` path.
+
+The `state` parameter is a server-issued, short-lived token bound to the signed-in user who started the connection from our dashboard (`GET /api/github/connect` signs it). GitHub echoes it back on the redirect, and the server verifies it before recording the installation, so ownership is attributed to the user who initiated the install from our app rather than to whoever merely arrives with an `installation_id`. An `installation_id` is not secret (it appears in redirect URLs and is enumerable), so without this binding a signed-in user could claim another tenant's installation. Verifying the `state` blocks that bare, guessed, or replayed `installation_id` from being claimed.
+
+Residual trust assumption: the `state` binding proves the connect was initiated from our app by this signed-in user; it does not cryptographically prove GitHub account ownership. Proving that would require GitHub user-to-server OAuth, which is deliberately out of scope for this read-only slice (authentication here is Supabase magic-link, not GitHub OAuth).
 
 This flow remains read-only: the dashboard verifies the installation through the server using the App JWT and stores only the installation reference (id and account login/type) scoped to the owner. No installation access token is persisted, and repositories are still fetched live rather than stored.
 
@@ -101,11 +105,13 @@ The final path segment is the slug. It maps to:
 NUXT_PUBLIC_GITHUB_APP_SLUG=pr-evidence-pack
 ```
 
-The application uses it to build the install URL on the dashboard:
+The server uses it to build the install URL for the dashboard "Connect GitHub App" link, appending the per-user `state` token described above:
 
 ```
-https://github.com/apps/<slug>/installations/new
+https://github.com/apps/<slug>/installations/new?state=<server-issued-token>
 ```
+
+The dashboard fetches this URL from `GET /api/github/connect` rather than building it in the browser, so the link always carries a freshly signed `state`.
 
 ## Step 8: Install the app on your repositories
 
@@ -126,11 +132,12 @@ NUXT_GITHUB_APP_ID=123456
 NUXT_GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
 ...
 -----END RSA PRIVATE KEY-----"
+NUXT_GITHUB_CONNECT_STATE_SECRET=generate-with-openssl-rand-hex-32
 NUXT_PUBLIC_GITHUB_APP_SLUG=pr-evidence-pack
 NUXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-`NUXT_GITHUB_WEBHOOK_SECRET` can remain unset for the MVP.
+`NUXT_GITHUB_CONNECT_STATE_SECRET` signs the per-user connect `state` token; generate a random value with `openssl rand -hex 32`. The connect link (and therefore the install flow) is unavailable until it is set, since the server fails closed rather than issue an unverifiable link. `NUXT_GITHUB_WEBHOOK_SECRET` can remain unset for the MVP.
 
 ### Production (Cloudflare Workers)
 
@@ -142,13 +149,19 @@ NUXT_PUBLIC_APP_URL=http://localhost:3000
   npx wrangler secret put NUXT_GITHUB_APP_PRIVATE_KEY < /secure/path/github-app-private-key.pem
   ```
 
+- `NUXT_GITHUB_CONNECT_STATE_SECRET`: encrypted Worker Secret. Generate and set it:
+
+  ```bash
+  openssl rand -hex 32 | npx wrangler secret put NUXT_GITHUB_CONNECT_STATE_SECRET
+  ```
+
 See the [Cloudflare Workers setup guide](cloudflare-setup.md) for the full variable and secret setup.
 
 ## Step 10: Verify
 
 1. Start the app (`npm run dev`, or your deployed Worker).
 2. Sign in and open the dashboard.
-3. Confirm the "Install GitHub App" link points to `https://github.com/apps/<your-slug>/installations/new`.
+3. Confirm the "Connect GitHub App" link points to `https://github.com/apps/<your-slug>/installations/new?state=<token>` (the `state` is issued by `GET /api/github/connect`). If the link is missing, confirm `NUXT_PUBLIC_GITHUB_APP_SLUG` and `NUXT_GITHUB_CONNECT_STATE_SECRET` are both set.
 4. Complete an install. GitHub redirects back to `<NUXT_PUBLIC_APP_URL>/dashboard` with the `installation_id` and `setup_action` query parameters, the dashboard shows a success banner, and the new installation appears automatically without a manual reload or database step. Reinstalling does not create a duplicate row.
 5. Confirm your installation, repositories, and open pull requests list correctly. This exercises the JWT signing and installation-token exchange.
 
@@ -159,7 +172,9 @@ If installations do not appear, first confirm the GitHub App **Setup URL** is se
 - **"Missing NUXT_GITHUB_APP_ID or NUXT_GITHUB_APP_PRIVATE_KEY":** the server-only credentials are not set. Confirm `.env` locally or the Worker variable/secret in production.
 - **Private key errors:** ensure the value is the complete PEM. Multi-line values must be quoted or provided with literal `\n` escapes; the app converts literal `\n` back to newlines.
 - **No repositories listed:** the app is authenticated but not installed on any repository, or it was installed on repositories other than the one you expect. Re-run the install step and select the correct repositories.
-- **Dashboard still shows "No GitHub App connected yet" after installing:** the GitHub App **Setup URL** is missing or does not point at `<NUXT_PUBLIC_APP_URL>/dashboard`, so GitHub never redirected back with the `installation_id` and `setup_action` parameters that record the installation. Set the Setup URL to `<NUXT_PUBLIC_APP_URL>/dashboard`, confirm it matches `NUXT_PUBLIC_APP_URL`, then install again while signed in.
+- **Dashboard still shows "No GitHub App connected yet" after installing:** the GitHub App **Setup URL** is missing or does not point at `<NUXT_PUBLIC_APP_URL>/dashboard`, so GitHub never redirected back with the `installation_id`, `setup_action`, and `state` parameters that record the installation. Set the Setup URL to `<NUXT_PUBLIC_APP_URL>/dashboard`, confirm it matches `NUXT_PUBLIC_APP_URL`, then install again while signed in.
+- **"This GitHub connection link is invalid or has expired":** the `state` token failed verification. This happens when the link was opened long after it was issued (the token is short-lived, about 15 minutes), when it was reused across accounts, or when `NUXT_GITHUB_CONNECT_STATE_SECRET` changed between issuing and verifying. Start the connection again from the dashboard so a fresh `state` is issued.
+- **"Connect GitHub App" link does not appear:** `NUXT_PUBLIC_GITHUB_APP_SLUG` or `NUXT_GITHUB_CONNECT_STATE_SECRET` is unset. The server fails closed and hides the link rather than issue one without a verifiable `state`.
 
 ## Reference documentation
 

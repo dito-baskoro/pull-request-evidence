@@ -24,7 +24,8 @@ layouts/default.vue       App title + sign-out control
 pages/
   index.vue               Redirects to /dashboard
   login.vue               Magic-link sign in
-  dashboard.vue           Protected dashboard (auth middleware, empty/loading states)
+  dashboard.vue           Protected dashboard (auth middleware, empty/loading states, post-install connect)
+  dashboard-callback.ts   Testable post-install callback logic (normalize + POST + branch)
 middleware/auth.ts        Redirects anonymous users to /login
 composables/useAuth.ts    Browser auth composable (current user, sign in, sign out)
 server/utils/supabase/
@@ -38,6 +39,8 @@ server/utils/
   hash.ts                 SHA-256 content-hash helper
   github/
     app-auth.ts           GitHub App JWT + short-lived installation token exchange
+    connect-state.ts      Sign/verify the per-user connect state token (pure + secret reader)
+    persist-installation.ts  Testable connect core: validate, verify state, owner-scoped upsert
     client.ts             Octokit factory from an installation token
     fetch-pr.ts           Read-only PR metadata, changed files/patches, commits
     fetch-checks.ts       Read-only check-run fetch + normalization
@@ -52,8 +55,9 @@ server/utils/
     evidence-registry.ts  Opaque E-NNNNN evidence IDs bound to the head SHA
     orchestrator.ts       Run pipeline seam + typed AI hook (FEAT-003)
 server/api/
+  github/connect.get.ts        Issue the install URL carrying a per-user state token
   github/installations.get.ts  List owned installations
-  github/installations.post.ts Persist an installation for the owner after install (dashboard callback)
+  github/installations.post.ts Persist an installation for the owner after install (dashboard callback; verifies state)
   github/repositories.get.ts   List repos for an owned installation
   github/pulls.get.ts          List open PRs for an owned repository
   analyses/index.post.ts       Create a run (ownership-checked) + deterministic pipeline
@@ -72,6 +76,9 @@ test/
   classify-file.test.ts   representative JS/TS paths, lockfiles, migrations, generated
   change-map.test.ts      category counts + candidate associations (never proof of coverage)
   evidence-registry.test.ts  E-NNNNN stability/uniqueness + SHA + permalink
+  installations-post.test.ts  connect helper: validation, state verification, owner-scoped upsert
+  connect-state.test.ts   sign/verify per-user connect state (roundtrip, tamper, uid, expiry)
+  dashboard-callback.test.ts  post-install callback: normalize, POST, success/failure branches
 ```
 
 ## Prerequisites
@@ -118,6 +125,7 @@ Nuxt maps environment variables onto `runtimeConfig`. `NUXT_*` variables are ser
 | `NUXT_GITHUB_APP_ID` | GitHub App numeric id used to mint short-lived installation tokens server-side; may be a plaintext Worker variable. |
 | `NUXT_GITHUB_APP_PRIVATE_KEY` | GitHub App private key (PEM). Encrypted Worker Secret; never sent to the browser. |
 | `NUXT_GITHUB_WEBHOOK_SECRET` | Encrypted Worker Secret used to verify GitHub webhook payloads. |
+| `NUXT_GITHUB_CONNECT_STATE_SECRET` | Encrypted Worker Secret used to sign the per-user GitHub connect `state` token. Binds a connect to the signed-in user who initiated it; the server fails closed (hides the connect link) when unset. Generate with `openssl rand -hex 32`. |
 | `NUXT_SUPABASE_SERVICE_ROLE_KEY` | Encrypted Worker Secret. Bypasses RLS; used only in `server/utils/supabase/admin.ts`. |
 | `NUXT_AI_API_KEY` | Encrypted Worker Secret for the AI provider or gateway. |
 | `NUXT_AI_GATEWAY_BASE_URL` | Optional OpenAI-compatible provider/gateway base URL; may be a plaintext Worker variable. |
@@ -240,10 +248,11 @@ The behavioral-change pass (plan section 10, Pass B) turns registered evidence i
 The following require a registry-enabled and network-enabled environment and could not be exercised in the authoring sandbox:
 
 1. Apply migrations: `supabase db push` (or run `0001_init.sql` then `0002_rls.sql`).
-2. Set env: copy `.env.example` to `.env` and fill values, including `NUXT_AI_API_KEY` (and optional `NUXT_AI_GATEWAY_BASE_URL`).
+2. Set env: copy `.env.example` to `.env` and fill values, including `NUXT_AI_API_KEY` (and optional `NUXT_AI_GATEWAY_BASE_URL`) and `NUXT_GITHUB_CONNECT_STATE_SECRET` (`openssl rand -hex 32`).
 3. Install and test: `unset NODE_OPTIONS && npm install && npm run test`.
 4. Validate the Worker target: `npm run typecheck && npm run build && npm run preview:cloudflare`.
-5. Deploy to a non-production Worker, then run the post-deploy smoke checks above against a real JS/TS pull request (real GitHub App + AI provider + Supabase) and confirm the report renders a cited behavioral claim whose permalink resolves to the exact evidenced lines.
+5. Manually exercise the connect flow: sign in, click "Connect GitHub App" (confirm the URL carries `?state=`), install the app, and confirm GitHub redirects back to `/dashboard`, the success banner shows, and the installation appears. Then confirm that POSTing another user's `installation_id` without a valid `state` is rejected with 400 and records nothing.
+6. Deploy to a non-production Worker, then run the post-deploy smoke checks above against a real JS/TS pull request (real GitHub App + AI provider + Supabase) and confirm the report renders a cited behavioral claim whose permalink resolves to the exact evidenced lines.
 
 ## Scripts
 
@@ -263,6 +272,7 @@ The following require a registry-enabled and network-enabled environment and cou
 
 - Secrets (GitHub App private key, Supabase service-role key, AI key) live only in server-only `runtimeConfig` and never in `runtimeConfig.public`.
 - GitHub integration is read-only. Installation access tokens are never persisted; they are minted server-side and short-lived. The post-install dashboard callback stores only an owner-scoped installation reference (id and account login/type) verified server-side via the App JWT; it persists no token and no repositories. The GitHub App Setup URL must match `NUXT_PUBLIC_APP_URL` and point at the `/dashboard` path for this to work.
+- The connect is bound to the user who initiated it. The dashboard "Connect GitHub App" link carries a server-issued, short-lived, per-user `state` token (signed with `NUXT_GITHUB_CONNECT_STATE_SECRET`); GitHub echoes it back on the setup redirect and the server verifies it before recording the installation. Because an `installation_id` is not secret and the App JWT can read metadata for every installation of the app, this `state` binding is what stops a signed-in user from claiming another tenant's installation (a cross-tenant read via the repositories route). It binds the connect to the initiating user but does not prove GitHub account ownership; that would require GitHub user-to-server OAuth, deliberately out of scope for this read-only slice. Verification fails closed: with no secret set, no connect link is issued.
 - Row-level security is enabled on every table so users cannot read one another's installations, analyses, or private repository content.
 - All repository content (PR text, patches, commit messages, file contents) is treated as untrusted data at the AI boundary; it is never treated as instructions.
 

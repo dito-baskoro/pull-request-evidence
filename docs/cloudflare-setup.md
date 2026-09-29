@@ -111,6 +111,14 @@ npx wrangler secret put NUXT_SUPABASE_SERVICE_ROLE_KEY
 npx wrangler secret put NUXT_AI_API_KEY
 ```
 
+Set the connect-state signing secret too. Generate a random value and pipe it in:
+
+```bash
+openssl rand -hex 32 | npx wrangler secret put NUXT_GITHUB_CONNECT_STATE_SECRET
+```
+
+This secret signs the per-user `state` token that binds a GitHub App connect to the signed-in user who initiated it (see the [GitHub App setup guide](github-app-setup.md)). If it is unset, the dashboard hides the "Connect GitHub App" link rather than issue an unverifiable one.
+
 For the multi-line GitHub PEM, pipe the file so line breaks are preserved:
 
 ```bash
