@@ -75,7 +75,20 @@ export function parseGithubRepositoryId(raw: unknown): number {
 }
 
 export interface PersistRepositoryArgs {
+  /**
+   * The per-request SSR (anon) client, used ONLY for the RLS-scoped ownership
+   * read on github_installations. It is never used for the write.
+   */
   supabase: SupabaseLike
+  /**
+   * The service-role admin client, used for the repositories upsert AFTER the
+   * ownership check above passes. The upsert (INSERT ... ON CONFLICT DO UPDATE)
+   * would otherwise be blocked by RLS: repositories has no UPDATE policy, so
+   * the conflict path fails with "new row violates row-level security policy
+   * (USING expression)". Writing with the admin client after an explicit
+   * in-code ownership check mirrors how the analysis pipeline persists rows.
+   */
+  admin: SupabaseLike
   /** Factory that returns an installation-scoped Octokit for a numeric id. */
   getInstallationOctokit: (githubInstallationId: number) => Promise<InstallationOctokitLike>
   /** The SSR-resolved authenticated user id (auth.uid()). */
@@ -91,12 +104,16 @@ export interface PersistRepositoryArgs {
  * identity from GitHub, and upsert an owner-scoped repositories row. Idempotent
  * on unique (github_repository_id, installation_id) so re-selecting a repo
  * refreshes its fields and returns the same id.
+ *
+ * The ownership read uses the RLS-scoped SSR client; the upsert uses the
+ * service-role admin client (see PersistRepositoryArgs.admin) only after that
+ * check passes.
  */
 export async function persistRepository(args: PersistRepositoryArgs): Promise<Repository> {
-  const { supabase, userId, installationId, githubRepositoryId } = args
+  const { supabase, admin, userId, installationId, githubRepositoryId } = args
 
-  // Ownership: the app-local installation must belong to this user. Resolve the
-  // numeric github_installation_id needed to talk to GitHub.
+  // Ownership: the app-local installation must belong to this user. Resolved on
+  // the RLS-scoped SSR client so it is enforced twice (in code and by RLS).
   const { data: installation, error: instErr } = await supabase
     .from('github_installations')
     .select('id, github_installation_id')
@@ -126,7 +143,10 @@ export async function persistRepository(args: PersistRepositoryArgs): Promise<Re
     )
   }
 
-  const { data: row, error } = await supabase
+  // Write with the admin client AFTER the ownership check above. The upsert
+  // needs both INSERT and UPDATE privileges on the conflict path, which RLS
+  // does not grant; ownership is already enforced in code here.
+  const { data: row, error } = await admin
     .from('repositories')
     .upsert(
       {
@@ -172,7 +192,10 @@ export interface ConnectUser {
 export interface ResolvePersistRepositoryArgs {
   user: ConnectUser | null
   body: PersistRepositoryBody | null | undefined
+  /** RLS-scoped SSR client for the ownership read. */
   supabase: SupabaseLike
+  /** Service-role client for the repositories upsert (after ownership check). */
+  admin: SupabaseLike
   getInstallationOctokit: (githubInstallationId: number) => Promise<InstallationOctokitLike>
 }
 
@@ -184,7 +207,7 @@ export interface ResolvePersistRepositoryArgs {
 export async function resolvePersistRepository(
   args: ResolvePersistRepositoryArgs,
 ): Promise<{ repository: Repository }> {
-  const { user, body, supabase, getInstallationOctokit } = args
+  const { user, body, supabase, admin, getInstallationOctokit } = args
 
   if (!user) {
     throw new PersistRepositoryError(401, 'Authentication required.')
@@ -195,6 +218,7 @@ export async function resolvePersistRepository(
 
   const repository = await persistRepository({
     supabase,
+    admin,
     getInstallationOctokit,
     userId: user.id,
     installationId,

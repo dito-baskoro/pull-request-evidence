@@ -18,17 +18,15 @@ interface UpsertCall {
 }
 
 /**
- * Fake SSR Supabase client. `github_installations` resolves ownership (returns
- * a row only when installationId + userId match the configured owner), and
- * `repositories` records the upsert and echoes a persisted row.
+ * Fake RLS-scoped SSR client. Only `github_installations` is read here (the
+ * ownership check); it returns a row only when installationId + userId match
+ * the configured owner. The repositories write happens on the admin fake below.
  */
-function fakeSupabase(
-  calls: UpsertCall[],
+function fakeSsr(
   opts: {
     ownedInstallationId?: string
     ownerUserId?: string
     githubInstallationId?: number
-    upsertError?: { message: string } | null
   } = {},
 ) {
   const ownedInstallationId = opts.ownedInstallationId ?? 'inst-uuid-1'
@@ -36,27 +34,36 @@ function fakeSupabase(
   const githubInstallationId = opts.githubInstallationId ?? 4242
 
   return {
-    from(table: string) {
-      if (table === 'github_installations') {
-        return {
-          select: () => ({
-            eq: (_c1: string, idVal: string) => ({
-              eq: (_c2: string, userVal: string) => ({
-                maybeSingle: () => {
-                  if (idVal === ownedInstallationId && userVal === ownerUserId) {
-                    return Promise.resolve({
-                      data: { id: ownedInstallationId, github_installation_id: githubInstallationId },
-                      error: null,
-                    })
-                  }
-                  return Promise.resolve({ data: null, error: null })
-                },
-              }),
+    from(_table: string) {
+      return {
+        select: () => ({
+          eq: (_c1: string, idVal: string) => ({
+            eq: (_c2: string, userVal: string) => ({
+              maybeSingle: () => {
+                if (idVal === ownedInstallationId && userVal === ownerUserId) {
+                  return Promise.resolve({
+                    data: { id: ownedInstallationId, github_installation_id: githubInstallationId },
+                    error: null,
+                  })
+                }
+                return Promise.resolve({ data: null, error: null })
+              },
             }),
           }),
-        }
+        }),
       }
-      // repositories
+    },
+  }
+}
+
+/**
+ * Fake service-role admin client. `repositories` records the upsert and echoes
+ * a persisted row. Mirrors how the route writes with the admin client after the
+ * ownership check passes.
+ */
+function fakeAdmin(calls: UpsertCall[], opts: { upsertError?: { message: string } | null } = {}) {
+  return {
+    from(_table: string) {
       return {
         upsert(values: Record<string, unknown>, options: { onConflict: string }) {
           calls.push({ values, options })
@@ -122,14 +129,16 @@ describe('parseInstallationUuid / parseGithubRepositoryId', () => {
 })
 
 describe('persistRepository', () => {
-  it('happy path: upserts owner-scoped row with identity resolved from GitHub', async () => {
+  it('happy path: upserts owner-scoped row (via admin client) with identity resolved from GitHub', async () => {
     const calls: UpsertCall[] = []
-    const supabase = fakeSupabase(calls)
+    const supabase = fakeSsr()
+    const admin = fakeAdmin(calls)
     const getInstallationOctokit = async () =>
       fakeInstallationOctokit([{ id: 999, name: 'app', owner: 'acme', private: true, default_branch: 'trunk' }])
 
     const result = await persistRepository({
       supabase,
+      admin,
       getInstallationOctokit,
       userId: 'user-1',
       installationId: 'inst-uuid-1',
@@ -152,61 +161,74 @@ describe('persistRepository', () => {
 
   it('is idempotent on re-select (same onConflict target)', async () => {
     const calls: UpsertCall[] = []
-    const supabase = fakeSupabase(calls)
     const getInstallationOctokit = async () =>
       fakeInstallationOctokit([{ id: 1, name: 'r', owner: 'o' }])
-    const args = { supabase, getInstallationOctokit, userId: 'user-1', installationId: 'inst-uuid-1', githubRepositoryId: 1 }
+    const args = { supabase: fakeSsr(), admin: fakeAdmin(calls), getInstallationOctokit, userId: 'user-1', installationId: 'inst-uuid-1', githubRepositoryId: 1 }
     await persistRepository(args)
     await persistRepository(args)
     expect(calls).toHaveLength(2)
     for (const c of calls) expect(c.options.onConflict).toBe('github_repository_id,installation_id')
   })
 
-  it('rejects when the user does not own the installation', async () => {
+  it('rejects when the user does not own the installation, before any write', async () => {
     const calls: UpsertCall[] = []
-    const supabase = fakeSupabase(calls, { ownerUserId: 'someone-else' })
+    const supabase = fakeSsr({ ownerUserId: 'someone-else' })
+    const admin = fakeAdmin(calls)
     const getInstallationOctokit = async () =>
       fakeInstallationOctokit([{ id: 1, name: 'r', owner: 'o' }])
 
     await expect(
-      persistRepository({ supabase, getInstallationOctokit, userId: 'user-1', installationId: 'inst-uuid-1', githubRepositoryId: 1 }),
+      persistRepository({ supabase, admin, getInstallationOctokit, userId: 'user-1', installationId: 'inst-uuid-1', githubRepositoryId: 1 }),
     ).rejects.toMatchObject({ statusCode: 403 })
     expect(calls).toHaveLength(0)
   })
 
   it('rejects when the repo is not accessible by the installation', async () => {
     const calls: UpsertCall[] = []
-    const supabase = fakeSupabase(calls)
+    const supabase = fakeSsr()
+    const admin = fakeAdmin(calls)
     const getInstallationOctokit = async () =>
       fakeInstallationOctokit([{ id: 1, name: 'r', owner: 'o' }])
 
     await expect(
-      persistRepository({ supabase, getInstallationOctokit, userId: 'user-1', installationId: 'inst-uuid-1', githubRepositoryId: 424242 }),
+      persistRepository({ supabase, admin, getInstallationOctokit, userId: 'user-1', installationId: 'inst-uuid-1', githubRepositoryId: 424242 }),
     ).rejects.toMatchObject({ statusCode: 404 })
     expect(calls).toHaveLength(0)
   })
 
   it('does not trust client-sent owner/name (identity is from GitHub only)', async () => {
     const calls: UpsertCall[] = []
-    const supabase = fakeSupabase(calls)
+    const supabase = fakeSsr()
+    const admin = fakeAdmin(calls)
     const getInstallationOctokit = async () =>
       fakeInstallationOctokit([{ id: 7, name: 'real-name', owner: 'real-owner' }])
 
     // The helper signature has no owner/name inputs; this asserts the persisted
     // values come solely from the GitHub listing.
-    await persistRepository({ supabase, getInstallationOctokit, userId: 'user-1', installationId: 'inst-uuid-1', githubRepositoryId: 7 })
+    await persistRepository({ supabase, admin, getInstallationOctokit, userId: 'user-1', installationId: 'inst-uuid-1', githubRepositoryId: 7 })
     expect(calls[0].values.owner).toBe('real-owner')
     expect(calls[0].values.name).toBe('real-name')
+  })
+
+  it('surfaces a 500 when the admin upsert fails', async () => {
+    const calls: UpsertCall[] = []
+    const supabase = fakeSsr()
+    const admin = fakeAdmin(calls, { upsertError: { message: 'db down' } })
+    const getInstallationOctokit = async () =>
+      fakeInstallationOctokit([{ id: 3, name: 'r', owner: 'o' }])
+
+    await expect(
+      persistRepository({ supabase, admin, getInstallationOctokit, userId: 'user-1', installationId: 'inst-uuid-1', githubRepositoryId: 3 }),
+    ).rejects.toMatchObject({ statusCode: 500, message: 'db down' })
   })
 })
 
 describe('resolvePersistRepository', () => {
   it('rejects unauthenticated before any GitHub or DB work', async () => {
     const calls: UpsertCall[] = []
-    const supabase = fakeSupabase(calls)
     const getInstallationOctokit = vi.fn(async () => fakeInstallationOctokit([]))
     await expect(
-      resolvePersistRepository({ user: null, body: { installationId: 'i', githubRepositoryId: 1 }, supabase, getInstallationOctokit }),
+      resolvePersistRepository({ user: null, body: { installationId: 'i', githubRepositoryId: 1 }, supabase: fakeSsr(), admin: fakeAdmin(calls), getInstallationOctokit }),
     ).rejects.toMatchObject({ statusCode: 401 })
     expect(getInstallationOctokit).not.toHaveBeenCalled()
     expect(calls).toHaveLength(0)
@@ -214,23 +236,22 @@ describe('resolvePersistRepository', () => {
 
   it('rejects a missing installationId/githubRepositoryId with 400', async () => {
     const calls: UpsertCall[] = []
-    const supabase = fakeSupabase(calls)
     const getInstallationOctokit = async () => fakeInstallationOctokit([])
     await expect(
-      resolvePersistRepository({ user: { id: 'user-1' }, body: {}, supabase, getInstallationOctokit }),
+      resolvePersistRepository({ user: { id: 'user-1' }, body: {}, supabase: fakeSsr(), admin: fakeAdmin(calls), getInstallationOctokit }),
     ).rejects.toMatchObject({ statusCode: 400 })
     expect(calls).toHaveLength(0)
   })
 
   it('persists and returns the repository on the happy path', async () => {
     const calls: UpsertCall[] = []
-    const supabase = fakeSupabase(calls)
     const getInstallationOctokit = async () =>
       fakeInstallationOctokit([{ id: 5, name: 'svc', owner: 'team' }])
     const { repository } = await resolvePersistRepository({
       user: { id: 'user-1' },
       body: { installationId: 'inst-uuid-1', githubRepositoryId: 5 },
-      supabase,
+      supabase: fakeSsr(),
+      admin: fakeAdmin(calls),
       getInstallationOctokit,
     })
     expect(repository).toMatchObject({ id: 'repo-uuid-1', owner: 'team', name: 'svc' })

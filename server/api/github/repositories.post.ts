@@ -35,11 +35,17 @@ export default defineEventHandler(async (event): Promise<{ repository: Repositor
 
   const body = await readBody<PersistRepositoryBody>(event)
 
+  // The ownership read runs on the RLS-scoped SSR client; the upsert runs on
+  // the service-role admin client after that check passes (repositories has no
+  // UPDATE RLS policy, so an RLS-scoped upsert conflict path is rejected).
+  const admin = createSupabaseAdminClient()
+
   try {
     return await resolvePersistRepository({
       user,
       body,
       supabase,
+      admin,
       getInstallationOctokit: (id: number) => getInstallationOctokit(id) as any,
     })
   }
