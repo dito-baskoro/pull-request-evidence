@@ -4,6 +4,8 @@ PR Evidence Pack is a read-only web application that turns a GitHub pull request
 
 This repository implements the first vertical slice of the plan (sign in, connect a read-only GitHub App, select a PR, ingest immutable artifacts, build a deterministic change map, produce one cited behavioral claim, validate the citation, and render a working commit permalink). Later milestones extend the same evidence model into requirements, risks, tests, and synthesis.
 
+Once the app is deployed and the GitHub App is connected, see the [usage guide](docs/usage.md) for step-by-step instructions on analyzing a pull request.
+
 The deterministic core and read-only GitHub seams (Milestones 2 to 4) are implemented under `server/utils/{github,patches,analysis}` and exposed through the Nitro routes under `server/api/`. The AI behavioral-change pass and citation validation (Milestone 5) are implemented behind the `AiAnalysisHook` seam: the provider-isolated AI code lives under `server/utils/ai/`, and citation/provenance validation lives in `server/utils/analysis/citation-validator.ts`.
 
 ## Framework note: Nuxt, not Next.js
