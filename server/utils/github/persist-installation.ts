@@ -225,6 +225,15 @@ export async function persistInstallation(
         'GitHub App credentials appear to be invalid. Verify NUXT_GITHUB_APP_ID and NUXT_GITHUB_APP_PRIVATE_KEY, and see docs/github-app-setup.md.',
       )
     }
+    // No HTTP status means the request never got a response from GitHub: the
+    // App JWT could not be signed (unusable private key) or the network call
+    // itself failed. Say so instead of implying a transient GitHub problem.
+    if (status === undefined) {
+      throw new PersistInstallationError(
+        502,
+        'Could not authenticate as the GitHub App before contacting GitHub. Check NUXT_GITHUB_APP_PRIVATE_KEY and see docs/github-app-setup.md.',
+      )
+    }
     throw new PersistInstallationError(
       502,
       'Could not verify the GitHub installation with GitHub. Please try again.',

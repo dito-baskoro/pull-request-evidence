@@ -280,6 +280,28 @@ describe('persistInstallation', () => {
     expect(calls).toHaveLength(0)
   })
 
+  it('reports an authentication failure when the JWT cannot be signed (no HTTP status)', async () => {
+    const calls: UpsertCall[] = []
+    const supabase = fakeSupabase(calls)
+    // Mirrors universal-github-app-jwt rejecting an unusable key locally,
+    // before any request reaches GitHub, so the error carries no status.
+    const appOctokit: AppOctokitLike = {
+      rest: {
+        apps: {
+          getInstallation: vi.fn(async () => {
+            throw new Error('[universal-github-app-jwt] Private Key is in PKCS#1 format, but only PKCS#8 is supported.')
+          }),
+        },
+      },
+    }
+
+    await expect(
+      persistInstallation({ supabase, appOctokit, userId: 'user-1', installationId: 1 }),
+    ).rejects.toMatchObject({ statusCode: 502, message: /could not authenticate as the github app/i })
+
+    expect(calls).toHaveLength(0)
+  })
+
   it('keeps the generic 502 message for unknown/transient (500) failures', async () => {
     const calls: UpsertCall[] = []
     const supabase = fakeSupabase(calls)

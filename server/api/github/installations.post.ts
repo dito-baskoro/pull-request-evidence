@@ -55,7 +55,18 @@ export default defineEventHandler(async (event): Promise<{ installation: GithubI
 
   const body = await readBody<ConnectInstallationBody>(event)
 
-  const appOctokit = await getAppOctokit()
+  // Credential problems (missing/non-numeric App ID, unusable private key) are
+  // configuration errors: surface the secret-free, actionable message instead
+  // of an opaque 500.
+  let appOctokit
+  try {
+    appOctokit = await getAppOctokit()
+  }
+  catch (err) {
+    const message = err instanceof Error ? err.message : 'GitHub App credentials are invalid.'
+    console.error('[github connect] app credentials unusable', { message })
+    throw createError({ statusCode: 502, statusMessage: message })
+  }
 
   // Bind the connect-state verifier with the server-only signing secret. This
   // runs BEFORE any GitHub lookup or DB write inside resolveInstallationConnect,
