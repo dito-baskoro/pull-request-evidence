@@ -128,6 +128,8 @@ In the Supabase dashboard: **Authentication -> URL Configuration**:
 
 Otherwise magic-link/OAuth logins will not return to your app. Your Supabase database, migrations, and RLS stay unchanged; Cloudflare only replaces the host.
 
+While configuring URLs, set the GitHub App **Setup URL** to `<NUXT_PUBLIC_APP_URL>/dashboard` so it stays consistent with `NUXT_PUBLIC_APP_URL` in production. After an install, GitHub redirects to that path with `installation_id` and `setup_action` query parameters and the dashboard records the installation for the signed-in owner (read-only, no token persisted). If the Setup URL and `NUXT_PUBLIC_APP_URL` diverge, the dashboard keeps showing "No GitHub App connected yet". See the [GitHub App setup guide](github-app-setup.md) for details.
+
 ## Step 9: Apply database migrations (if not already done)
 
 ```bash

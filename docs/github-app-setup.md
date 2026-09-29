@@ -24,6 +24,11 @@ The App ID is a public identifier. The private key is secret and must stay serve
    - **GitHub App name:** a unique name, for example `PR Evidence Pack`.
    - **Homepage URL:** `http://localhost:3000` for development, or your deployed Worker URL.
    - **Callback URL:** not required for the current Supabase-based login flow.
+   - **Setup URL (after installation):** set this to `<NUXT_PUBLIC_APP_URL>/dashboard`, using `http://localhost:3000/dashboard` for local development or `https://<your-app>/dashboard` in production. If **Redirect on update after installation** is available, enable it so updates return to the same `/dashboard` path.
+
+After a user installs or updates the app, GitHub redirects the browser to this Setup URL and appends `installation_id` and `setup_action` query parameters. The dashboard reads those parameters and records the installation for the signed-in user, so the person who completes the install becomes the owner of that installation. This is what persists the connection so the dashboard stops showing "No GitHub App connected yet". The Setup URL must stay consistent with `NUXT_PUBLIC_APP_URL` and always point at the `/dashboard` path.
+
+This flow remains read-only: the dashboard verifies the installation through the server using the App JWT and stores only the installation reference (id and account login/type) scoped to the owner. No installation access token is persisted, and repositories are still fetched live rather than stored.
 
 ## Step 2: Disable the webhook (for the MVP)
 
@@ -104,10 +109,13 @@ https://github.com/apps/<slug>/installations/new
 
 ## Step 8: Install the app on your repositories
 
-1. From the app settings page, click **Install App**.
+Install while signed in to PR Evidence Pack so the installation is attributed to your account.
+
+1. From the app settings page, click **Install App** (or use the "Connect GitHub App" link on the dashboard).
 2. Click **Install** next to your account or organization.
 3. Choose **Only select repositories**.
 4. Select `pull-request-evidence` and any other repositories whose pull requests you want to analyze.
+5. Click **Install**. GitHub redirects you back to the Setup URL (`<NUXT_PUBLIC_APP_URL>/dashboard`) with `installation_id` and `setup_action` query parameters, and the dashboard records the installation automatically. There is no manual database step. Reconnecting or reinstalling the same account is idempotent and does not create a duplicate installation row.
 
 ## Step 9: Map values to configuration
 
@@ -141,15 +149,17 @@ See the [Cloudflare Workers setup guide](cloudflare-setup.md) for the full varia
 1. Start the app (`npm run dev`, or your deployed Worker).
 2. Sign in and open the dashboard.
 3. Confirm the "Install GitHub App" link points to `https://github.com/apps/<your-slug>/installations/new`.
-4. Confirm your installation, repositories, and open pull requests list correctly. This exercises the JWT signing and installation-token exchange.
+4. Complete an install. GitHub redirects back to `<NUXT_PUBLIC_APP_URL>/dashboard` with the `installation_id` and `setup_action` query parameters, the dashboard shows a success banner, and the new installation appears automatically without a manual reload or database step. Reinstalling does not create a duplicate row.
+5. Confirm your installation, repositories, and open pull requests list correctly. This exercises the JWT signing and installation-token exchange.
 
-If installations do not appear, re-check the App ID, the private key (full PEM including the BEGIN/END lines), and that the app is installed on at least one repository.
+If installations do not appear, first confirm the GitHub App **Setup URL** is set to `<NUXT_PUBLIC_APP_URL>/dashboard` (matching `NUXT_PUBLIC_APP_URL`), then re-check the App ID, the private key (full PEM including the BEGIN/END lines), and that the app is installed on at least one repository.
 
 ## Troubleshooting
 
 - **"Missing NUXT_GITHUB_APP_ID or NUXT_GITHUB_APP_PRIVATE_KEY":** the server-only credentials are not set. Confirm `.env` locally or the Worker variable/secret in production.
 - **Private key errors:** ensure the value is the complete PEM. Multi-line values must be quoted or provided with literal `\n` escapes; the app converts literal `\n` back to newlines.
 - **No repositories listed:** the app is authenticated but not installed on any repository, or it was installed on repositories other than the one you expect. Re-run the install step and select the correct repositories.
+- **Dashboard still shows "No GitHub App connected yet" after installing:** the GitHub App **Setup URL** is missing or does not point at `<NUXT_PUBLIC_APP_URL>/dashboard`, so GitHub never redirected back with the `installation_id` and `setup_action` parameters that record the installation. Set the Setup URL to `<NUXT_PUBLIC_APP_URL>/dashboard`, confirm it matches `NUXT_PUBLIC_APP_URL`, then install again while signed in.
 
 ## Reference documentation
 

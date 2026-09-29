@@ -53,6 +53,7 @@ server/utils/
     orchestrator.ts       Run pipeline seam + typed AI hook (FEAT-003)
 server/api/
   github/installations.get.ts  List owned installations
+  github/installations.post.ts Persist an installation for the owner after install (dashboard callback)
   github/repositories.get.ts   List repos for an owned installation
   github/pulls.get.ts          List open PRs for an owned repository
   analyses/index.post.ts       Create a run (ownership-checked) + deterministic pipeline
@@ -169,6 +170,8 @@ The production target is a dynamic Cloudflare Module Worker, not a statically ge
 
 4. In Supabase **Authentication → URL Configuration**, set the Site URL to `NUXT_PUBLIC_APP_URL` and add `<NUXT_PUBLIC_APP_URL>/dashboard` to the allowed redirect URLs. Keep the existing Supabase project, migrations, RLS policies, anon key, and service-role boundary unchanged; Workers is only the application host. See Cloudflare's [Supabase integration guide](https://developers.cloudflare.com/workers/databases/third-party-integrations/supabase/).
 
+   In the same step, set the GitHub App **Setup URL** to `<NUXT_PUBLIC_APP_URL>/dashboard` so it matches `NUXT_PUBLIC_APP_URL`. After a user installs the app, GitHub redirects to that path with `installation_id` and `setup_action` query parameters, and the dashboard records the installation for the signed-in owner (read-only, no token persisted). If the Setup URL and `NUXT_PUBLIC_APP_URL` diverge, installs will not be recorded and the dashboard keeps showing "No GitHub App connected yet". See the [GitHub App setup guide](docs/github-app-setup.md).
+
 5. Build, preview locally with the Workers runtime, and deploy:
 
    ```bash
@@ -259,7 +262,7 @@ The following require a registry-enabled and network-enabled environment and cou
 ## Security posture
 
 - Secrets (GitHub App private key, Supabase service-role key, AI key) live only in server-only `runtimeConfig` and never in `runtimeConfig.public`.
-- GitHub integration is read-only. Installation access tokens are never persisted; they are minted server-side and short-lived.
+- GitHub integration is read-only. Installation access tokens are never persisted; they are minted server-side and short-lived. The post-install dashboard callback stores only an owner-scoped installation reference (id and account login/type) verified server-side via the App JWT; it persists no token and no repositories. The GitHub App Setup URL must match `NUXT_PUBLIC_APP_URL` and point at the `/dashboard` path for this to work.
 - Row-level security is enabled on every table so users cannot read one another's installations, analyses, or private repository content.
 - All repository content (PR text, patches, commit messages, file contents) is treated as untrusted data at the AI boundary; it is never treated as instructions.
 
