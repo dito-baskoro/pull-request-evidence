@@ -100,7 +100,20 @@ function isSchemaError(err: unknown): boolean {
   return name === 'ZodError' || name === 'AI_TypeValidationError' || name === 'TypeValidationError'
 }
 
-/** Persist workflow_version + model_id on the run (plan section 10, step 8). */
+/**
+ * Persist the resolved workflow_version + model_id on the run
+ * (plan section 10, step 8).
+ *
+ * The idempotency-key columns (workflow_version, model_id) are intentionally
+ * NOT updated here. They are part of the unique constraint
+ * (pull_request_id, workflow_version, model_id) and must remain immutable
+ * after the run row is created. Mutating them causes a duplicate-key error
+ * when a prior run for the same PR already exists with the resolved values.
+ *
+ * The resolved values are written to the separate provenance columns
+ * (resolved_workflow_version, resolved_model_id) added in migration
+ * 0004_analysis_runs_provenance_columns.sql.
+ */
 async function recordProvenance(
   admin: SupabaseClient,
   analysisRunId: string,
@@ -109,7 +122,7 @@ async function recordProvenance(
 ): Promise<void> {
   const { error } = await admin
     .from('analysis_runs')
-    .update({ workflow_version: workflowVersion, model_id: modelId })
+    .update({ resolved_workflow_version: workflowVersion, resolved_model_id: modelId })
     .eq('id', analysisRunId)
   if (error) throw new Error(`Failed to record provenance: ${error.message}`)
 }

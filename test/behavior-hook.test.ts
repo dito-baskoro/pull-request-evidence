@@ -145,10 +145,10 @@ describe('createBehaviorAnalysisHook persistence', () => {
 
     await hook.run(deterministicResult())
 
-    // Provenance recorded (workflow_version + model_id).
+    // Provenance recorded in the dedicated provenance columns (not the key columns).
     expect(state.updates).toHaveLength(1)
     expect(state.updates[0].table).toBe('analysis_runs')
-    expect(state.updates[0].patch).toMatchObject({ model_id: 'fake-model' })
+    expect(state.updates[0].patch).toMatchObject({ resolved_model_id: 'fake-model' })
 
     // One report item + one citation join.
     expect(state.reportItems).toHaveLength(1)

@@ -85,8 +85,18 @@ export default defineEventHandler(async (event): Promise<{ analysisId: string; s
     pull_number: pullRequestNumber,
   })
 
+  // Use the service-role admin client for all writes. The ownership check above
+  // (via the RLS-scoped `supabase` client) already confirmed the user owns the
+  // installation, so privileged writes are safe here. Upserts hit the ON
+  // CONFLICT DO UPDATE path when the same (repo, number, sha) or
+  // (pull_request_id, workflow_version, model_id) already exists; using the
+  // admin client avoids the RLS USING-expression rejection that would otherwise
+  // occur because 0002_rls.sql defines no UPDATE policies for these tables on
+  // the anon/user role.
+  const admin = createSupabaseAdminClient()
+
   // Upsert the pull_requests row (idempotent on repo + number + head SHA).
-  const { data: prRow, error: prErr } = await supabase
+  const { data: prRow, error: prErr } = await admin
     .from('pull_requests')
     .upsert(
       {
@@ -110,7 +120,7 @@ export default defineEventHandler(async (event): Promise<{ analysisId: string; s
   }
 
   // Create (or reuse) the analysis run. Idempotent on the plan's key.
-  const { data: runRow, error: runErr } = await supabase
+  const { data: runRow, error: runErr } = await admin
     .from('analysis_runs')
     .upsert(
       {
@@ -128,10 +138,6 @@ export default defineEventHandler(async (event): Promise<{ analysisId: string; s
   if (runErr || !runRow) {
     throw createError({ statusCode: 500, statusMessage: runErr?.message ?? 'Failed to create analysis run.' })
   }
-
-  // Run the deterministic pipeline with the service-role admin client. The
-  // orchestrator re-checks installation ownership before any privileged write.
-  const admin = createSupabaseAdminClient()
 
   // Build the AI hook behind the provider seam. If no AI key is configured the
   // run still completes the deterministic phase; the AI stage is skipped.
