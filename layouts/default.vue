@@ -1,64 +1,109 @@
 <script setup lang="ts">
-// Default authenticated layout: app title plus a sign-out control that only
-// appears when a user is signed in.
+// Default authenticated layout: a wordmark that doubles as a home link, the
+// signed-in identity, and a sign-out control that only appears when a user is
+// signed in. Colors and spacing come from the global tokens in assets/css.
 const { user, signOut } = useAuth()
 </script>
 
 <template>
-  <div class="app-shell">
-    <header class="app-header">
-      <NuxtLink to="/dashboard" class="app-title">PR Evidence Pack</NuxtLink>
-      <nav class="app-nav">
-        <span v-if="user" class="app-user">{{ user.email }}</span>
-        <button v-if="user" type="button" class="app-signout" @click="signOut">
-          Sign out
-        </button>
+  <div class="shell">
+    <header class="shell-header">
+      <NuxtLink to="/dashboard" class="brand">
+        <span class="brand-mark" aria-hidden="true">PR</span>
+        <span class="brand-name">Evidence&nbsp;Pack</span>
+      </NuxtLink>
+
+      <nav v-if="user" class="shell-nav">
+        <span class="shell-user">{{ user.email }}</span>
+        <button type="button" class="btn" @click="signOut">Sign out</button>
       </nav>
     </header>
 
-    <main class="app-main">
+    <main class="shell-main">
       <slot />
     </main>
+
+    <footer class="shell-footer">
+      <span>Read-only pull-request review evidence.</span>
+      <span class="shell-footer-dot" aria-hidden="true">&middot;</span>
+      <span>Every claim links to an immutable commit.</span>
+    </footer>
   </div>
 </template>
 
 <style scoped>
-.app-shell {
+.shell {
   min-height: 100vh;
-  font-family: system-ui, -apple-system, sans-serif;
-  color: #1a1a1a;
+  display: flex;
+  flex-direction: column;
 }
-.app-header {
+.shell-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1.5rem;
-  border-bottom: 1px solid #e5e5e5;
+  gap: 1rem;
+  padding: 0.7rem 1.5rem;
+  background: var(--c-surface);
+  border-bottom: 1px solid var(--c-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
-.app-title {
-  font-weight: 600;
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
   text-decoration: none;
-  color: inherit;
+  color: var(--c-ink);
 }
-.app-nav {
+.brand-mark {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: var(--c-accent);
+  border-radius: var(--radius-sm);
+  padding: 0.28rem 0.42rem;
+  line-height: 1;
+}
+.brand-name {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.shell-nav {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.9rem;
 }
-.app-user {
-  color: #555;
-  font-size: 0.9rem;
+.shell-user {
+  color: var(--c-ink-soft);
+  font-size: 0.88rem;
+  font-family: var(--font-mono);
 }
-.app-signout {
-  cursor: pointer;
-  border: 1px solid #ccc;
-  background: #fff;
-  border-radius: 6px;
-  padding: 0.35rem 0.75rem;
-}
-.app-main {
-  padding: 1.5rem;
+.shell-main {
+  flex: 1;
+  width: 100%;
   max-width: 960px;
   margin: 0 auto;
+  padding: 2rem 1.5rem 3rem;
+}
+.shell-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  padding: 1.25rem 1.5rem;
+  border-top: 1px solid var(--c-border);
+  color: var(--c-ink-faint);
+  font-size: var(--step-1);
+}
+.shell-footer-dot {
+  color: var(--c-border-strong);
+}
+@media (max-width: 520px) {
+  .shell-user {
+    display: none;
+  }
 }
 </style>

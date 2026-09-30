@@ -1,0 +1,188 @@
+/*
+ * Design tokens and base styles for PR Evidence Pack.
+ *
+ * The look is a deliberate, restrained developer-tool aesthetic: a warm-neutral
+ * paper background, a single indigo accent, a monospace face reserved for
+ * identifiers (SHAs, paths, evidence keys), and hairline borders instead of
+ * heavy shadows. Components consume these tokens rather than hard-coding hex
+ * values, so the palette stays consistent across pages.
+ */
+
+:root {
+  /* Neutrals: a slightly warm gray ramp, not pure black on white. */
+  --c-bg: #f7f7f5;
+  --c-surface: #ffffff;
+  --c-surface-muted: #fbfbfa;
+  --c-border: #e4e3df;
+  --c-border-strong: #d3d2cc;
+  --c-ink: #1c1b19;
+  --c-ink-soft: #55534e;
+  --c-ink-faint: #8a887f;
+
+  /* Single accent + semantic colors, each with a soft tint for fills. */
+  --c-accent: #4f46e5;
+  --c-accent-ink: #3730a3;
+  --c-accent-tint: #eef0fb;
+  --c-add: #157f3b;
+  --c-del: #b3261e;
+  --c-warn-ink: #7a5600;
+  --c-warn-tint: #fdf6e3;
+  --c-warn-border: #ecd9a6;
+  --c-ok-ink: #1b5e20;
+  --c-ok-tint: #e9f5ec;
+  --c-ok-border: #b6d9bf;
+  --c-err-ink: #8a1c1c;
+  --c-err-tint: #fdeceb;
+  --c-err-border: #f0bdb8;
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --shadow-sm: 0 1px 2px rgba(28, 27, 25, 0.04);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+
+  --step-1: 0.78rem;
+  --step0: 0.95rem;
+  --step1: 1.12rem;
+  --step2: 1.4rem;
+  --step3: 1.85rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--c-bg);
+  color: var(--c-ink);
+  font-family: var(--font-sans);
+  font-size: var(--step0);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+a {
+  color: var(--c-accent-ink);
+}
+
+/* ------------------------------------------------------------------ *
+ * Small reusable primitives (used across pages).
+ * ------------------------------------------------------------------ */
+
+/* Uppercase micro-label for section eyebrows. */
+.eyebrow {
+  font-size: var(--step-1);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--c-ink-faint);
+  font-weight: 600;
+}
+
+/* Monospace status/label chip. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: var(--font-mono);
+  font-size: var(--step-1);
+  line-height: 1;
+  padding: 0.28rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--c-border-strong);
+  color: var(--c-ink-soft);
+  background: var(--c-surface-muted);
+  white-space: nowrap;
+}
+.chip-accent {
+  border-color: transparent;
+  color: var(--c-accent-ink);
+  background: var(--c-accent-tint);
+}
+.chip-ok {
+  border-color: var(--c-ok-border);
+  color: var(--c-ok-ink);
+  background: var(--c-ok-tint);
+}
+.chip-warn {
+  border-color: var(--c-warn-border);
+  color: var(--c-warn-ink);
+  background: var(--c-warn-tint);
+}
+.chip-err {
+  border-color: var(--c-err-border);
+  color: var(--c-err-ink);
+  background: var(--c-err-tint);
+}
+
+/* Buttons. */
+.btn {
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--c-border-strong);
+  background: var(--c-surface);
+  color: var(--c-ink);
+  padding: 0.4rem 0.8rem;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--c-accent);
+}
+.btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.btn-primary {
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--c-accent-ink);
+  border-color: var(--c-accent-ink);
+}
+
+/* Inline notice banners. */
+.notice {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--c-border);
+  padding: 0.6rem 0.85rem;
+  font-size: 0.92rem;
+}
+.notice-ok {
+  color: var(--c-ok-ink);
+  background: var(--c-ok-tint);
+  border-color: var(--c-ok-border);
+}
+.notice-err {
+  color: var(--c-err-ink);
+  background: var(--c-err-tint);
+  border-color: var(--c-err-border);
+}
+.notice-warn {
+  color: var(--c-warn-ink);
+  background: var(--c-warn-tint);
+  border-color: var(--c-warn-border);
+}
+
+/* Surface panel. */
+.panel {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}

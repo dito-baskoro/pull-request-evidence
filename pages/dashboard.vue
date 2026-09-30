@@ -165,239 +165,320 @@ const installUrl = computed(() => connectData.value?.installUrl || null)
 </script>
 
 <template>
-  <section class="dashboard">
-    <h1>Dashboard</h1>
+  <section class="dash">
+    <header class="dash-head">
+      <p class="eyebrow">Workspace</p>
+      <h1 class="dash-title">Choose a pull request to analyze</h1>
+      <p class="dash-sub">
+        Pick a connected installation, open a repository, then run analysis on an
+        open pull request. The result is a cited evidence pack, not an approval.
+      </p>
+    </header>
 
-    <p v-if="connectStatus === 'success'" class="dashboard-banner dashboard-banner-success" role="status">
+    <p v-if="connectStatus === 'success'" class="notice notice-ok" role="status">
       {{ connectMessage }}
     </p>
-    <p v-else-if="connectStatus === 'error'" class="dashboard-banner dashboard-banner-error" role="alert">
+    <p v-else-if="connectStatus === 'error'" class="notice notice-err" role="alert">
       {{ connectMessage }}
     </p>
 
-    <p v-if="loading || installPending" class="dashboard-loading">Loading your account...</p>
+    <p v-if="loading || installPending" class="dash-loading">Loading your account&hellip;</p>
 
     <template v-else>
-      <p v-if="user" class="dashboard-welcome">
-        Signed in as {{ user.email }}.
-      </p>
-
-      <div v-if="!hasInstallations" class="dashboard-empty">
-        <h2>No GitHub App connected yet</h2>
-        <p>
+      <!-- Empty state: no installation connected. -->
+      <div v-if="!hasInstallations" class="panel dash-empty">
+        <p class="eyebrow">Get started</p>
+        <h2 class="dash-empty-title">No GitHub App connected yet</h2>
+        <p class="dash-empty-body">
           Connect a read-only GitHub App installation to select a pull request
-          for analysis.
+          for analysis. The app only ever reads; it never comments or approves.
         </p>
-        <a v-if="installUrl" :href="installUrl" class="dashboard-connect">Connect GitHub App</a>
+        <a v-if="installUrl" :href="installUrl" class="btn btn-primary dash-empty-cta">
+          Connect GitHub App
+        </a>
       </div>
 
-      <template v-else>
-        <h2>Installations</h2>
-        <ul class="dashboard-installations">
-          <li v-for="inst in installations" :key="inst.id">
-            <button
-              type="button"
-              :class="{ active: selectedInstallationId === inst.id }"
-              @click="selectedInstallationId = inst.id"
-            >
-              {{ inst.accountLogin }} ({{ inst.accountType }})
-            </button>
-          </li>
-        </ul>
-
-        <template v-if="selectedInstallationId">
-          <h2>Repositories</h2>
-          <p class="dashboard-note">Select a repository to list its open pull requests.</p>
-          <p v-if="repoPending" class="dashboard-loading">Loading repositories...</p>
-          <ul v-else class="dashboard-repos">
-            <li v-for="repo in repositories" :key="repo.githubRepositoryId">
+      <!-- Three-step flow, laid out as a numbered pipeline. -->
+      <ol v-else class="flow">
+        <!-- Step 1: installations -->
+        <li class="flow-step">
+          <div class="flow-marker"><span>1</span></div>
+          <div class="flow-body">
+            <h2 class="flow-title">Installation</h2>
+            <div class="chip-row">
               <button
+                v-for="inst in installations"
+                :key="inst.id"
                 type="button"
-                class="repo-button"
-                :class="{ active: selectedGithubRepoId === repo.githubRepositoryId }"
-                :disabled="repoSelectPending && selectedGithubRepoId === repo.githubRepositoryId"
-                @click="selectRepository(repo)"
+                class="pick"
+                :class="{ 'pick-active': selectedInstallationId === inst.id }"
+                @click="selectedInstallationId = inst.id"
               >
-                {{ repo.owner }}/{{ repo.name }}
-                <span v-if="repo.isPrivate" class="repo-private">private</span>
-                <span
-                  v-if="repoSelectPending && selectedGithubRepoId === repo.githubRepositoryId"
-                  class="repo-loading"
-                >opening...</span>
+                <span class="pick-name">{{ inst.accountLogin }}</span>
+                <span class="chip">{{ inst.accountType }}</span>
               </button>
-            </li>
-          </ul>
+            </div>
+          </div>
+        </li>
 
-          <p v-if="repoError" class="dashboard-banner dashboard-banner-error" role="alert">
-            {{ repoError }}
-          </p>
-
-          <template v-if="selectedGithubRepoId && !repoSelectPending">
-            <h2>Open pull requests</h2>
-            <p v-if="pullsPending" class="dashboard-loading">Loading pull requests...</p>
-            <ul v-else-if="pulls.length" class="dashboard-pulls">
-              <li v-for="pr in pulls" :key="pr.number">
-                <div class="pull-meta">
-                  <span class="pull-number">#{{ pr.number }}</span>
-                  <span class="pull-title">{{ pr.title }}</span>
-                  <span v-if="pr.authorLogin" class="pull-author">by {{ pr.authorLogin }}</span>
-                </div>
+        <!-- Step 2: repositories -->
+        <li class="flow-step" :class="{ 'flow-step-idle': !selectedInstallationId }">
+          <div class="flow-marker"><span>2</span></div>
+          <div class="flow-body">
+            <h2 class="flow-title">Repository</h2>
+            <p v-if="!selectedInstallationId" class="dash-hint">Select an installation first.</p>
+            <template v-else>
+              <p class="dash-hint">Selecting a repository loads its open pull requests.</p>
+              <p v-if="repoPending" class="dash-loading">Loading repositories&hellip;</p>
+              <div v-else-if="repositories.length" class="chip-row">
                 <button
+                  v-for="repo in repositories"
+                  :key="repo.githubRepositoryId"
                   type="button"
-                  class="pull-analyze"
-                  :disabled="analyzingPr !== null"
-                  @click="runAnalysis(pr.number)"
+                  class="pick"
+                  :class="{ 'pick-active': selectedGithubRepoId === repo.githubRepositoryId }"
+                  :disabled="repoSelectPending && selectedGithubRepoId === repo.githubRepositoryId"
+                  @click="selectRepository(repo)"
                 >
-                  {{ analyzingPr === pr.number ? 'Analyzing...' : 'Run analysis' }}
+                  <span class="pick-name">
+                    <span class="pick-owner">{{ repo.owner }}/</span>{{ repo.name }}
+                  </span>
+                  <span v-if="repo.isPrivate" class="chip">private</span>
+                  <span
+                    v-if="repoSelectPending && selectedGithubRepoId === repo.githubRepositoryId"
+                    class="pick-spin"
+                  >opening&hellip;</span>
                 </button>
-              </li>
-            </ul>
-            <p v-else-if="selectedRepositoryId" class="dashboard-note">
-              No open pull requests found for this repository.
-            </p>
-          </template>
-        </template>
-      </template>
+              </div>
+              <p v-else class="dash-hint">No repositories are accessible through this installation.</p>
+              <p v-if="repoError" class="notice notice-err" role="alert">{{ repoError }}</p>
+            </template>
+          </div>
+        </li>
+
+        <!-- Step 3: pull requests -->
+        <li
+          class="flow-step flow-step-last"
+          :class="{ 'flow-step-idle': !selectedGithubRepoId }"
+        >
+          <div class="flow-marker"><span>3</span></div>
+          <div class="flow-body">
+            <h2 class="flow-title">Pull request</h2>
+            <p v-if="!selectedGithubRepoId" class="dash-hint">Select a repository first.</p>
+            <template v-else-if="!repoSelectPending">
+              <p v-if="pullsPending" class="dash-loading">Loading pull requests&hellip;</p>
+              <ul v-else-if="pulls.length" class="pr-list">
+                <li v-for="pr in pulls" :key="pr.number" class="pr-row">
+                  <div class="pr-info">
+                    <div class="pr-line">
+                      <span class="pr-num">#{{ pr.number }}</span>
+                      <span class="pr-title">{{ pr.title }}</span>
+                    </div>
+                    <div class="pr-sub">
+                      <span v-if="pr.authorLogin">{{ pr.authorLogin }}</span>
+                      <span class="pr-sha">{{ pr.headSha.slice(0, 7) }}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn-primary pr-run"
+                    :disabled="analyzingPr !== null"
+                    @click="runAnalysis(pr.number)"
+                  >
+                    {{ analyzingPr === pr.number ? 'Analyzing\u2026' : 'Run analysis' }}
+                  </button>
+                </li>
+              </ul>
+              <p v-else-if="selectedRepositoryId" class="dash-hint">
+                No open pull requests found for this repository.
+              </p>
+            </template>
+          </div>
+        </li>
+      </ol>
     </template>
   </section>
 </template>
 
 <style scoped>
-.dashboard {
-  max-width: 720px;
+.dash-head {
+  margin-bottom: 1.5rem;
 }
-.dashboard-loading {
-  color: #777;
+.dash-title {
+  font-size: var(--step3);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  margin: 0.35rem 0 0.5rem;
 }
-.dashboard-banner {
-  margin-top: 1rem;
-  padding: 0.6rem 0.9rem;
-  border-radius: 6px;
-  border: 1px solid transparent;
+.dash-sub {
+  color: var(--c-ink-soft);
+  max-width: 46ch;
+  margin: 0;
 }
-.dashboard-banner-success {
-  color: #1b5e20;
-  background: #e8f5e9;
-  border-color: #a5d6a7;
+.dash-loading,
+.dash-hint {
+  color: var(--c-ink-faint);
+  font-size: 0.9rem;
+  margin: 0.35rem 0;
 }
-.dashboard-banner-error {
-  color: #8a1c1c;
-  background: #fdecea;
-  border-color: #f5b5b0;
-}
-.dashboard-welcome {
-  color: #555;
-}
-.dashboard-empty {
-  margin-top: 1.5rem;
-  padding: 1.25rem;
-  border: 1px dashed #ccc;
-  border-radius: 8px;
-  background: #fafafa;
-}
-.dashboard-empty h2 {
-  margin-top: 0;
-  font-size: 1.1rem;
-}
-.dashboard-connect {
-  display: inline-block;
+
+/* Empty state */
+.dash-empty {
+  padding: 1.75rem;
   margin-top: 0.5rem;
 }
-.dashboard-installations,
-.dashboard-repos {
+.dash-empty-title {
+  font-size: var(--step2);
+  margin: 0.35rem 0 0.5rem;
+}
+.dash-empty-body {
+  color: var(--c-ink-soft);
+  max-width: 52ch;
+  margin: 0 0 1.1rem;
+}
+.dash-empty-cta {
+  text-decoration: none;
+}
+
+/* Numbered pipeline */
+.flow {
   list-style: none;
+  margin: 0;
   padding: 0;
 }
-.dashboard-installations button {
-  cursor: pointer;
-  border: 1px solid #ccc;
-  background: #fff;
-  border-radius: 6px;
-  padding: 0.35rem 0.75rem;
-  margin: 0.15rem 0;
+.flow-step {
+  display: grid;
+  grid-template-columns: 2rem 1fr;
+  gap: 1rem;
+  position: relative;
+  padding-bottom: 1.75rem;
 }
-.dashboard-installations button.active {
-  border-color: #1a73e8;
-  background: #eef4ff;
+/* Connector line runs through the markers, stopping at the last step. */
+.flow-step:not(.flow-step-last)::before {
+  content: "";
+  position: absolute;
+  left: 0.97rem;
+  top: 2rem;
+  bottom: 0;
+  width: 2px;
+  background: var(--c-border);
 }
-.dashboard-repos li {
-  padding: 0.15rem 0;
+.flow-marker {
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-strong);
+  color: var(--c-ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  z-index: 1;
 }
-.dashboard-note {
-  color: #666;
-  font-size: 0.9rem;
-  margin: 0.25rem 0 0.5rem;
+.flow-title {
+  font-size: var(--step1);
+  margin: 0.2rem 0 0.6rem;
 }
-.repo-button {
-  cursor: pointer;
-  border: 1px solid #ccc;
-  background: #fff;
-  border-radius: 6px;
-  padding: 0.35rem 0.75rem;
-  text-align: left;
+.flow-step-idle .flow-marker {
+  color: var(--c-ink-faint);
 }
-.repo-button:disabled {
-  cursor: default;
-  opacity: 0.7;
+.flow-step-idle .flow-title {
+  color: var(--c-ink-faint);
 }
-.repo-button.active {
-  border-color: #1a73e8;
-  background: #eef4ff;
-}
-.repo-loading {
-  color: #777;
-  font-size: 0.75rem;
-  margin-left: 0.4rem;
-}
-.dashboard-pulls {
-  list-style: none;
-  padding: 0;
-}
-.dashboard-pulls li {
+
+/* Selectable chips (installations + repositories) */
+.chip-row {
   display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.4rem 0;
-  border-bottom: 1px solid #f0f0f0;
   flex-wrap: wrap;
-}
-.pull-meta {
-  display: flex;
   gap: 0.5rem;
-  align-items: baseline;
-  flex-wrap: wrap;
 }
-.pull-number {
-  font-family: monospace;
-  color: #555;
-}
-.pull-title {
-  font-weight: 500;
-}
-.pull-author {
-  color: #777;
-  font-size: 0.8rem;
-}
-.pull-analyze {
+.pick {
+  font: inherit;
   cursor: pointer;
-  border: 1px solid #1a73e8;
-  background: #1a73e8;
-  color: #fff;
-  border-radius: 6px;
-  padding: 0.3rem 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.7rem;
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
 }
-.pull-analyze:disabled {
+.pick:hover:not(:disabled) {
+  border-color: var(--c-accent);
+}
+.pick:disabled {
   cursor: default;
   opacity: 0.6;
 }
-.repo-private {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  color: #8a5a00;
-  border: 1px solid #f0d68a;
-  border-radius: 4px;
-  padding: 0 0.35rem;
-  margin-left: 0.5rem;
+.pick-active {
+  border-color: var(--c-accent);
+  background: var(--c-accent-tint);
+  box-shadow: inset 0 0 0 1px var(--c-accent);
+}
+.pick-name {
+  font-weight: 500;
+}
+.pick-owner {
+  color: var(--c-ink-faint);
+  font-weight: 400;
+}
+.pick-spin {
+  font-size: var(--step-1);
+  color: var(--c-ink-faint);
+}
+
+/* Pull-request list */
+.pr-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--c-surface);
+}
+.pr-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0.9rem;
+  flex-wrap: wrap;
+}
+.pr-row + .pr-row {
+  border-top: 1px solid var(--c-border);
+}
+.pr-info {
+  min-width: 0;
+}
+.pr-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.pr-num {
+  font-family: var(--font-mono);
+  color: var(--c-ink-faint);
+  font-size: 0.85rem;
+}
+.pr-title {
+  font-weight: 500;
+}
+.pr-sub {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.2rem;
+  color: var(--c-ink-faint);
+  font-size: var(--step-1);
+}
+.pr-sha {
+  font-family: var(--font-mono);
+}
+.pr-run {
+  flex-shrink: 0;
 }
 </style>
