@@ -25,3 +25,6 @@ logs
 
 # OS files
 .DS_Store
+
+wrangler.jsonc
+.npmrc
